@@ -1,35 +1,77 @@
 import SwiftData
 import SwiftUI
 
-/// S12: one switch per filter, grouped by platform. Changes apply to an open page at once.
+/// One switch per filter, grouped by platform. Changes apply to an open page at once.
 struct FiltersScreen: View {
     @Environment(RuleStore.self) private var ruleStore
     @Query(sort: \PlatformSetting.sortOrder) private var settings: [PlatformSetting]
 
-    private var active: [PlatformSetting] { settings.filter(\.isEnabled) }
+    private var activeSettings: [PlatformSetting] {
+        settings.filter(\.isEnabled)
+    }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if active.isEmpty {
-                    EmptyState(symbol: "slider.horizontal.3", title: "No platforms yet",
-                               message: "Turn on a platform from Home and its filters show up here.")
-                } else {
-                    List {
-                        ForEach(active) { setting in
-                            Section(ruleStore.platform(id: setting.platformID)?.name ?? setting.platformID) {
-                                ForEach(ruleStore.toggles(for: setting.platformID)) { toggle in
-                                    ToggleRow(title: toggle.title, subtitle: toggle.detail, isOn: Binding(
-                                        get: { setting.ruleToggles[toggle.key] ?? toggle.defaultOn },
-                                        set: { setting.ruleToggles[toggle.key] = $0 }
-                                    ))
-                                }
-                            }
-                        }
+        GlassScreen(
+            title: "Filters",
+            subtitle: "Shape every platform around what you actually want to see.",
+            symbol: "slider.horizontal.3"
+        ) {
+            if activeSettings.isEmpty {
+                GlassSectionCard {
+                    EmptyState(
+                        symbol: "slider.horizontal.3",
+                        title: "No platforms yet",
+                        message: "Turn on a platform from Settings and its filters show up here."
+                    )
+                }
+            } else {
+                VStack(spacing: Space.s16) {
+                    ForEach(activeSettings) { setting in
+                        FilterPlatformCard(setting: setting)
                     }
                 }
             }
-            .navigationTitle("Filters")
+        }
+    }
+}
+
+private struct FilterPlatformCard: View {
+    let setting: PlatformSetting
+    @Environment(RuleStore.self) private var ruleStore
+
+    private var platformName: String {
+        ruleStore.platform(id: setting.platformID)?.name ?? setting.platformID
+    }
+
+    private var toggles: [RuleToggle] {
+        ruleStore.toggles(for: setting.platformID)
+    }
+
+    var body: some View {
+        GlassSectionCard {
+            Label(platformName, systemImage: "sparkles")
+                .font(TypeRole.headline)
+                .foregroundStyle(.white)
+                .accessibilityAddTraits(.isHeader)
+
+            VStack(spacing: 0) {
+                ForEach(toggles) { toggle in
+                    ToggleRow(
+                        title: toggle.title,
+                        subtitle: toggle.detail,
+                        isOn: Binding(
+                            get: { setting.ruleToggles[toggle.key] ?? toggle.defaultOn },
+                            set: { setting.ruleToggles[toggle.key] = $0 }
+                        )
+                    )
+                    .padding(.vertical, Space.s8)
+
+                    if toggle.id != toggles.last?.id {
+                        Divider()
+                            .overlay(.white.opacity(0.12))
+                    }
+                }
+            }
         }
     }
 }
