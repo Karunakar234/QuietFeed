@@ -115,9 +115,12 @@ struct HomeScreen: View {
                 Button(action: showFilters) {
                     Image(systemName: "slider.horizontal.3")
                         .font(TypeRole.body.weight(.semibold))
+                        .foregroundStyle(.white)
                         .frame(width: 50, height: 50)
+                        .contentShape(Circle())
+                        .glassEffect(.regular.interactive(), in: .circle)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.plain)
                 .accessibilityLabel("Filters")
             }
         }

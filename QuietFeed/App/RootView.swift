@@ -6,6 +6,7 @@ struct RootView: View {
     @Environment(\.modelContext) private var context
     @Query private var settings: [PlatformSetting]
     @AppStorage("didOnboard") private var didOnboard = false
+    @State private var session = PlayerSession()
 
     var body: some View {
         Group {
@@ -13,6 +14,14 @@ struct RootView: View {
                 ProgressView().accessibilityLabel("Loading")
             } else if didOnboard {
                 MainTabs()
+                    // The open platform sits above the tabs, full screen or as the mini-player.
+                    // It lives here rather than in a cover so shrinking it keeps the same web view playing.
+                    .overlay {
+                        if let platform = session.platform {
+                            PlatformScreen(platform: platform, startURL: session.startURL).id(session.openID)
+                        }
+                    }
+                    .environment(session)
             } else {
                 OnboardingFlow { didOnboard = true }
             }
@@ -34,14 +43,22 @@ struct RootView: View {
     }
 }
 
+enum AppTab: Hashable {
+    case home, filters, blocking, stats, settings
+}
+
 struct MainTabs: View {
+    @State private var selection: AppTab = .home
+
     var body: some View {
-        TabView {
-            HomeScreen().tabItem { Label("Home", systemImage: "house") }
-            FiltersScreen().tabItem { Label("Filters", systemImage: "slider.horizontal.3") }
-            BlockingScreen().tabItem { Label("Blocking", systemImage: "hand.raised") }
-            StatsScreen().tabItem { Label("Stats", systemImage: "chart.bar") }
-            SettingsScreen().tabItem { Label("Settings", systemImage: "gearshape") }
+        TabView(selection: $selection) {
+            Tab("Home", systemImage: "house", value: .home) {
+                HomeScreen(showFilters: { selection = .filters })
+            }
+            Tab("Filters", systemImage: "slider.horizontal.3", value: .filters) { FiltersScreen() }
+            Tab("Blocking", systemImage: "hand.raised", value: .blocking) { BlockingScreen() }
+            Tab("Stats", systemImage: "chart.bar", value: .stats) { StatsScreen() }
+            Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsScreen() }
         }
     }
 }

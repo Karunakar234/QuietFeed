@@ -15,6 +15,9 @@ final class WebModel: NSObject {
 
     @ObservationIgnored private(set) var webView: WKWebView!
     @ObservationIgnored private var navGuard: NavigationGuard
+    /// The first page to load, when it isn't the platform's home.
+    @ObservationIgnored private let startURL: URL?
+    @ObservationIgnored private let insights: WeeklyInsightsStore
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
     private static let engineSource: String = {
@@ -26,8 +29,16 @@ final class WebModel: NSObject {
         return source
     }()
 
-    init(platform: Platform, dataStoreID: UUID, rules: [FilterRule]) {
+    init(
+        platform: Platform,
+        dataStoreID: UUID,
+        rules: [FilterRule],
+        startURL: URL? = nil,
+        insights: WeeklyInsightsStore
+    ) {
         self.platform = platform
+        self.startURL = startURL
+        self.insights = insights
         self.navGuard = NavigationGuard(platform: platform, rules: rules)
         super.init()
 
@@ -74,13 +85,17 @@ final class WebModel: NSObject {
         // Load only after the ad rules are attached, so the first page request is filtered too.
         Task { @MainActor in
             await AdBlocker.install(into: config.userContentController)
-            loadHome()
+            load(startURL ?? platform.baseUrl)
         }
     }
 
     func loadHome() {
+        load(platform.baseUrl)
+    }
+
+    private func load(_ url: URL) {
         state = .loading(progress: 0)
-        webView.load(URLRequest(url: platform.baseUrl))
+        webView.load(URLRequest(url: url))
     }
 
     func reload() {
@@ -90,6 +105,18 @@ final class WebModel: NSObject {
 
     func goBack() {
         if webView.canGoBack { webView.goBack() } else { loadHome() }
+    }
+
+    /// Plays or pauses the page's video. The mini-player's button, since the page's own
+    /// controls are too small to use there.
+    func togglePlayback() {
+        webView.evaluateJavaScript("""
+        (function () {
+          var media = document.querySelector('video');
+          if (!media) return;
+          if (media.paused) { media.play().catch(function () {}); } else { media.pause(); }
+        })();
+        """)
     }
 
     func continuePlaybackInBackground() {
@@ -122,7 +149,83 @@ final class WebModel: NSObject {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: mainFrameOnly
         ))
+        if platform.id == "youtube" || platform.id == "youtube_music" {
+            controller.addUserScript(WKUserScript(
+                source: Self.keepVisibleSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
+        if platform.id == "youtube_music" {
+            controller.addUserScript(WKUserScript(
+                source: Self.trackControlsSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
     }
+
+    /// The lock screen and Control Center build their buttons from the page's media session:
+    /// seek handlers give ±10 second buttons, track handlers give next and previous song.
+    /// For YouTube Music this drops the seek handlers and makes sure there are track handlers,
+    /// using YouTube Music's own if it registers them, or pressing its Next/Previous buttons if not.
+    private static let trackControlsSource = """
+    (function () {
+      var session = navigator.mediaSession;
+      if (!session || typeof session.setActionHandler !== 'function') return;
+      var original = session.setActionHandler.bind(session);
+      var pageHas = { nexttrack: false, previoustrack: false };
+      function set(action, handler) {
+        try { original(action, handler); } catch (e) { /* action not supported here */ }
+      }
+
+      session.setActionHandler = function (action, handler) {
+        if (action === 'seekforward' || action === 'seekbackward') return set(action, null);
+        if (action in pageHas) pageHas[action] = !!handler;
+        return set(action, handler);
+      };
+
+      var buttons = {
+        nexttrack: ['.next-button', 'button[aria-label="Next"]', 'button[aria-label="Next song"]'],
+        previoustrack: ['.previous-button', 'button[aria-label="Previous"]', 'button[aria-label="Previous song"]']
+      };
+      function press(selectors) {
+        for (var i = 0; i < selectors.length; i++) {
+          var button = document.querySelector(selectors[i]);
+          if (button) { button.click(); return; }
+        }
+      }
+      function useTrackControls() {
+        set('seekforward', null);
+        set('seekbackward', null);
+        Object.keys(buttons).forEach(function (action) {
+          if (!pageHas[action]) set(action, function () { press(buttons[action]); });
+        });
+      }
+
+      // Media "play" events don't bubble, so listen in the capture phase. Each new song reapplies it.
+      document.addEventListener('play', useTrackControls, true);
+      useTrackControls();
+    })();
+    """
+
+    /// YouTube pauses its player when the page reports that it's hidden, which is what iOS
+    /// tells it when QuietFeed goes to the background. This keeps the page reporting "visible"
+    /// so music carries on (with the audio background mode in Info.plist). Only the visibility
+    /// signal is touched; focus, blur and unload behave as normal.
+    private static let keepVisibleSource = """
+    (function () {
+      var props = { hidden: false, webkitHidden: false, visibilityState: 'visible', webkitVisibilityState: 'visible' };
+      Object.keys(props).forEach(function (name) {
+        try {
+          Object.defineProperty(document, name, { configurable: true, get: function () { return props[name]; } });
+        } catch (e) { /* leave the browser's own value */ }
+      });
+      ['visibilitychange', 'webkitvisibilitychange'].forEach(function (type) {
+        window.addEventListener(type, function (event) { event.stopImmediatePropagation(); }, true);
+      });
+    })();
+    """
 
     private static func json(_ rules: [FilterRule]) -> String {
         guard let data = try? JSONEncoder.rules.encode(rules), let text = String(data: data, encoding: .utf8) else { return "[]" }
@@ -138,8 +241,12 @@ final class WebModel: NSObject {
     }
 
     fileprivate func handleMessage(_ body: Any) {
-        // The engine reports what it hid or blocked. Nothing is stored or sent anywhere yet;
-        // /replica-backend uses this for the "report a problem" flow.
+        guard let message = body as? [String: Any],
+              message["type"] as? String == "hidden",
+              let count = message["count"] as? NSNumber else {
+            return
+        }
+        insights.recordHidden(count.intValue)
     }
 
     private func fail(_ error: Error) {

@@ -237,6 +237,7 @@ struct WebTopBar: View {
     var showsBack = false
     var onClose: (() -> Void)? = nil
     var onPost: (() -> Void)? = nil
+    var onMinimize: (() -> Void)? = nil
     var onBack: () -> Void = {}
     var onAccount: () -> Void = {}
     var onReload: () -> Void = {}
@@ -270,6 +271,11 @@ struct WebTopBar: View {
                     .frame(minHeight: Layout.minTap)
                     .foregroundStyle(Theme.color.accent)
                     .accessibilityHint("Opens the real app for 10 minutes")
+            }
+            if let onMinimize {
+                Button(action: onMinimize) { Image(systemName: "pip.enter") }
+                    .frame(width: Layout.minTap, height: Layout.minTap)
+                    .accessibilityLabel("Shrink to mini player")
             }
             Button(action: onReload) { Image(systemName: "arrow.clockwise") }
                 .frame(width: Layout.minTap, height: Layout.minTap)

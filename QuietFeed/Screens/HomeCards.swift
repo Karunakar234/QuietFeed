@@ -38,9 +38,115 @@ struct AuroraBackground: View {
     }
 }
 
+// MARK: - Shared app screen
+
+struct GlassScreen<Content: View>: View {
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
+    let symbol: String
+    let content: Content
+
+    init(
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.symbol = symbol
+        self.content = content()
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.s24) {
+                    GlassScreenHeader(title: title, subtitle: subtitle, symbol: symbol)
+                    content
+                }
+                .padding(.horizontal, Layout.screenPadding)
+                .padding(.top, Space.s8)
+                .padding(.bottom, Space.s24)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollIndicators(.hidden)
+            .background { AuroraBackground() }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+}
+
+struct GlassScreenHeader: View {
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: Space.s12) {
+            Image(systemName: symbol)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Neon.teal)
+                .frame(width: 52, height: 52)
+                .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
+
+            VStack(alignment: .leading, spacing: Space.s4) {
+                Text(title)
+                    .font(TypeRole.display)
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(TypeRole.footnote)
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+struct GlassSectionCard<Content: View>: View {
+    let title: LocalizedStringKey?
+    let symbol: String?
+    let content: Content
+
+    init(
+        _ title: LocalizedStringKey? = nil,
+        symbol: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.symbol = symbol
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s12) {
+            if let title {
+                Label {
+                    Text(title)
+                } icon: {
+                    if let symbol {
+                        Image(systemName: symbol)
+                            .foregroundStyle(Neon.teal)
+                    }
+                }
+                .font(TypeRole.headline)
+                .foregroundStyle(.white)
+                .accessibilityAddTraits(.isHeader)
+            }
+            content
+        }
+        .padding(Space.s16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.lg))
+    }
+}
+
 // MARK: - Platform cards
 
 /// How each platform's Home card looks. Home only; the rest of the app uses the plain platform data.
+/// Highlights use a non-breaking space before each bullet so a wrapped line never starts with one.
 struct PlatformArt {
     let highlights: String
     let iconColor: Color
@@ -50,13 +156,13 @@ struct PlatformArt {
     static func forPlatform(_ id: String) -> PlatformArt {
         switch id {
         case "instagram":
-            return PlatformArt(highlights: "Friends • Stories • DMs", iconColor: Neon.teal,
+            return PlatformArt(highlights: "Friends\u{00A0}• Stories\u{00A0}• DMs", iconColor: Neon.teal,
                                artSymbol: "sun.horizon.fill", artColors: [Neon.magenta, Neon.orange])
         case "youtube":
-            return PlatformArt(highlights: "Videos • Channels • Live", iconColor: Neon.red,
+            return PlatformArt(highlights: "Videos\u{00A0}• Channels\u{00A0}• Live", iconColor: Neon.red,
                                artSymbol: "mountain.2.fill", artColors: [Neon.violet, Neon.blue])
         case "youtube_music":
-            return PlatformArt(highlights: "Music • Playlists • Radio", iconColor: Neon.teal,
+            return PlatformArt(highlights: "Music\u{00A0}• Playlists\u{00A0}• Radio", iconColor: Neon.teal,
                                artSymbol: "headphones", artColors: [Neon.violet, Neon.magenta])
         default:
             return PlatformArt(highlights: "", iconColor: Neon.teal,
@@ -78,30 +184,32 @@ struct PlatformCard: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: Space.s8) {
-                Image(systemName: platform.symbol)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(art.iconColor)
-                    .shadow(color: art.iconColor.opacity(0.6), radius: 8)
-                Spacer(minLength: Space.s12)
-                Text(platform.name)
-                    .font(TypeRole.title3)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                HStack(alignment: .center, spacing: Space.s8) {
-                    Text(art.highlights.uppercased())
-                        .font(TypeRole.caption)
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Spacer(minLength: 0)
+                // The chevron sits up beside the icon so the subtitle below gets the card's full width.
+                HStack(alignment: .top) {
+                    Image(systemName: platform.symbol)
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(art.iconColor)
+                        .shadow(color: art.iconColor.opacity(0.6), radius: 8)
+                    Spacer(minLength: Space.s8)
                     Image(systemName: "chevron.right")
                         .font(TypeRole.footnote.weight(.bold))
                         .foregroundStyle(Neon.teal)
                         .frame(width: 30, height: 30)
                         .background(.white.opacity(0.12), in: Circle())
                 }
+                Spacer(minLength: Space.s12)
+                Text(platform.name)
+                    .font(TypeRole.title3)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                // Wraps to a second line on half-width cards rather than being cut off.
+                Text(art.highlights.uppercased())
+                    .font(TypeRole.caption)
+                    .tracking(0.6)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(Space.s16)
             .frame(maxWidth: .infinity, minHeight: 168, alignment: .leading)
@@ -121,7 +229,7 @@ struct PlatformCard: View {
                            startPoint: .topTrailing, endPoint: .bottomLeading)
             Image(systemName: art.artSymbol)
                 .font(.system(size: isWide ? 110 : 84))
-                .foregroundStyle(.white.opacity(0.22))
+                .foregroundStyle(.white.opacity(0.14))
                 .padding(.trailing, Space.s12)
         }
         .mask(LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing))
@@ -214,16 +322,19 @@ struct RecommendationCard: View {
 
 // MARK: - Insights
 
-/// Weekly insights need Screen Time data, which isn't connected yet, so the card says that
-/// instead of showing made-up numbers. The empty bars keep the layout ready for real data.
 struct InsightsCard: View {
-    /// Monday-first short day names in the person's language.
+    @Environment(WeeklyInsightsStore.self) private var insights
+
+    /// Monday-first one-letter day names in the person's language.
     private var days: [String] {
-        let symbols = Calendar.current.shortWeekdaySymbols
+        let symbols = Calendar.current.veryShortWeekdaySymbols
         return Array(symbols[1...] + symbols[..<1])
     }
 
     var body: some View {
+        let counts = insights.dailyCounts
+        let highestCount = max(counts.max() ?? 0, 1)
+
         VStack(alignment: .leading, spacing: Space.s12) {
             Label {
                 Text("Your Weekly Insights")
@@ -236,32 +347,44 @@ struct InsightsCard: View {
 
             HStack(alignment: .bottom, spacing: Space.s16) {
                 VStack(alignment: .leading, spacing: Space.s4) {
-                    Image(systemName: "hourglass")
-                        .font(.system(size: 28, weight: .semibold))
+                    Text(insights.totalHidden, format: .number)
+                        .font(TypeRole.display)
                         .foregroundStyle(Neon.teal)
-                    Text("Insights arrive once Screen Time access is set up.")
+                    Text("items filtered this week")
                         .font(TypeRole.footnote)
                         .foregroundStyle(.white.opacity(0.75))
-                        .fixedSize(horizontal: false, vertical: true)
                 }
+
                 Spacer(minLength: 0)
+
                 HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(days, id: \.self) { day in
+                    ForEach(counts.indices, id: \.self) { index in
                         VStack(spacing: Space.s4) {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .strokeBorder(.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                                .frame(width: 18, height: 44)
-                            Text(day)
+                                .fill(Neon.teal.opacity(counts[index] == 0 ? 0.18 : 0.85))
+                                .frame(
+                                    width: 18,
+                                    height: max(4, 44 * CGFloat(counts[index]) / CGFloat(highestCount))
+                                )
+                            Text(days[index])
                                 .font(TypeRole.caption)
                                 .foregroundStyle(.white.opacity(0.6))
+                                .lineLimit(1)
+                                .fixedSize()
                         }
                     }
                 }
+                .frame(height: 64, alignment: .bottom)
                 .accessibilityHidden(true)
             }
         }
         .padding(Space.s16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: Radius.lg))
+        .task {
+            insights.refresh()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(insights.totalHidden) items filtered this week")
     }
 }
