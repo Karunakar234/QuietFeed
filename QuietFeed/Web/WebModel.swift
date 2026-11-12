@@ -316,12 +316,14 @@ final class WebModel: NSObject {
     }
 
     fileprivate func handleMessage(_ body: Any) {
-        guard let message = body as? [String: Any],
-              message["type"] as? String == "hidden",
-              let count = message["count"] as? NSNumber else {
+        guard let message = body as? [String: Any], let type = message["type"] as? String else { return }
+        switch type {
+        case "hidden":
+            guard let count = message["count"] as? NSNumber else { return }
+            insights.recordHidden(count.intValue)
+        default:
             return
         }
-        insights.recordHidden(count.intValue)
     }
 
     private func fail(_ error: Error) {

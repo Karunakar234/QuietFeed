@@ -2,7 +2,7 @@
 // It takes rules as DATA (selectors, URL patterns, text patterns, one action from a
 // fixed set) and never evaluates code that arrives from the server.
 // Actions: hide | remove | redirect | block_navigation | disable_scroll | skip_ads
-//          | autohide_top | autohide_bottom
+//          | autohide_top | autohide_bottom | click
 (function () {
   'use strict';
   if (window.__stillfeed) return;
@@ -11,6 +11,8 @@
   var HIDDEN = 'data-stillfeed-hidden';
   // Marks elements a plain CSS rule hides once they've been counted for weekly insights.
   var COUNTED = 'data-stillfeed-counted';
+  // Marks buttons a `click` rule has already pressed, so each is pressed once.
+  var CLICKED = 'data-stillfeed-clicked';
   var SINGLE = 'stillfeed-single';
   var state = { rules: [], locked: false, lastPath: null, timer: null, observer: null, adTimer: null, adSanitizerInstalled: false };
 
@@ -145,6 +147,18 @@
     var hidden = 0;
     state.rules.forEach(function (r) {
       if (!r.selectors.length) return;
+      if (r.action === 'click') {
+        // Presses a button whose own label matches, e.g. "Not now" on an "open the app" pop-up.
+        var buttons = document.querySelectorAll(r.selectors.join(','));
+        for (var b = 0; b < buttons.length; b++) {
+          var button = buttons[b];
+          if (button.hasAttribute(CLICKED)) continue;
+          if (!firstMatch(r.text, (button.textContent || '').trim())) continue;
+          button.setAttribute(CLICKED, '');
+          button.click();
+        }
+        return;
+      }
       if (r.action !== 'hide' && r.action !== 'remove') return;
       var nodes = document.querySelectorAll(r.selectors.join(','));
       if (!r.text.length) {
@@ -262,18 +276,25 @@
   }
   function pinnedBarsAt(y) {
     var found = [];
+    var nearTop = y < window.innerHeight / 2;
+    function add(el) {
+      if (!el || found.indexOf(el) !== -1) return;
+      var box = el.getBoundingClientRect();
+      var touchesEdge = nearTop ? box.top <= 8 : box.bottom >= window.innerHeight - 8;
+      if (box.height > 0 && box.height < window.innerHeight * 0.2 && touchesEdge) found.push(el);
+    }
     [0.15, 0.5, 0.85].forEach(function (fx) {
       var el = document.elementFromPoint(window.innerWidth * fx, y);
       while (el && el !== document.body && el !== document.documentElement) {
         var position = window.getComputedStyle(el).position;
-        if (position === 'fixed' || position === 'sticky') {
-          var box = el.getBoundingClientRect();
-          if (box.height > 0 && box.height < window.innerHeight * 0.2 && found.indexOf(el) === -1) found.push(el);
-          break;
-        }
+        if (position === 'fixed' || position === 'sticky') { add(el); break; }
         el = el.parentElement;
       }
     });
+    var selectors = nearTop
+      ? 'header,[role="banner"],ytm-mobile-topbar-renderer,ytmusic-nav-bar'
+      : 'footer,nav,[role="navigation"],ytm-pivot-bar-renderer,ytmusic-player-bar';
+    document.querySelectorAll(selectors).forEach(add);
     return found;
   }
   function hideChrome() {
@@ -285,23 +306,30 @@
       bar.el.style.setProperty('transition', 'translate 0.25s ease', 'important');
       bar.el.style.setProperty('translate', bar.offset, 'important');
     });
-    chrome.hidden = true;
+    // Pages often create their navigation after the script boots. Keep retrying until
+    // at least one matching bar exists instead of recording a false hidden state.
+    chrome.hidden = chrome.bars.length > 0;
   }
   function showChrome() {
     chrome.bars.forEach(function (bar) { bar.el.style.removeProperty('translate'); });
     chrome.bars = [];
     chrome.hidden = false;
   }
-  function chromeScrolled() {
-    var y = window.scrollY;
+  function chromeScrolled(event) {
+    var target = event && event.target;
+    var isDocumentScroll = !target || target === document || target === document.documentElement || target === document.body;
+    var y = isDocumentScroll ? window.scrollY : (target.scrollTop || 0);
     var delta = y - chrome.lastY;
     chrome.lastY = y;
     var edges = chromeEdges();
     if (!edges.top && !edges.bottom) { if (chrome.hidden) showChrome(); return; }
     // Same feel as QuietFeed's own bar: ~30pt down hides, ~40pt up or near the top shows.
     chrome.run = (delta >= 0) === (chrome.run >= 0) ? chrome.run + delta : delta;
-    if (y < 40 || chrome.run < -40) { if (chrome.hidden) showChrome(); }
-    else if (chrome.run > 30 && !chrome.hidden) hideChrome();
+    if (y < 40 || chrome.run < -40) {
+      if (chrome.hidden) showChrome();
+    } else if (chrome.run > 30) {
+      if (!chrome.hidden) hideChrome();
+    }
   }
 
   function checkLocation() {
@@ -364,8 +392,7 @@
     checkLocation();
     updateAdSkipping();
     scheduleScan();
-    // A switch changed on the Filters screen: put the site's bars back; the next scroll
-    // hides whichever ones are still switched on.
+    // Separate header/footer scrolling modes start visible and react to the next scroll.
     if (chrome.hidden) showChrome();
   }
 
@@ -377,7 +404,9 @@
       window.addEventListener('touchmove', blockScroll, { capture: true, passive: false });
       window.addEventListener('keydown', blockKeys, true);
       document.addEventListener('click', interceptClick, true);
-      window.addEventListener('scroll', chromeScrolled, { passive: true });
+      // Scroll does not bubble, so capture on document to see the nested scrollers used by
+      // YouTube, YouTube Music, Instagram, and Prime Video.
+      document.addEventListener('scroll', chromeScrolled, { capture: true, passive: true });
       state.observer = new MutationObserver(scheduleScan);
       state.observer.observe(document.documentElement, { childList: true, subtree: true });
       document.addEventListener('DOMContentLoaded', function () { writeStyle(); scheduleScan(); });

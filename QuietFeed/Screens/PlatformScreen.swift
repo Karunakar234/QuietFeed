@@ -38,15 +38,15 @@ struct PlatformScreen: View {
         var isLeading = false
     }
 
-    /// The tile's "while scrolling" switches on the Filters screen.
+    /// The platform switches enabled on the Filters screen.
     private var enabledKeys: Set<String> {
         Set(ruleStore.enabledRules(for: platform.id, toggles: toggles).map(\.key))
     }
     private var hidesHeader: Bool { enabledKeys.contains("hide_header") }
     private var hidesFooter: Bool { enabledKeys.contains("hide_footer") }
 
-    /// Scrolling down with either switch on: the page fills the screen edge to edge.
-    /// (The site's own bars are slid away by FilterEngine.js.)
+    /// Scrolling down with either switch on lets the page fill the screen edge to edge.
+    /// The site's selected bar follows the scroll direction in FilterEngine.js.
     private var isBrowsingFullScreen: Bool {
         !session.isMinimized && (model?.isImmersive ?? false) && (hidesHeader || hidesFooter)
     }
@@ -58,10 +58,10 @@ struct PlatformScreen: View {
     var body: some View {
         GeometryReader { geo in
             let minimized = session.isMinimized
-            // Scrolling down a page hides the margins (either switch) and QuietFeed's bar
-            // (Hide header), so the site has the whole screen.
-            let fullBleed = isBrowsingFullScreen
-            let barHidden = fullBleed && hidesHeader
+            // Hide Header controls QuietFeed's chrome immediately. The site's own bars still
+            // follow their existing scroll behavior from FilterEngine.js.
+            let barHidden = !minimized && hidesHeader
+            let fullBleed = barHidden || isBrowsingFullScreen
             VStack(spacing: 0) {
                 if !minimized && !barHidden {
                     WebTopBar(
@@ -90,7 +90,12 @@ struct PlatformScreen: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .topLeading) {
-                    if barHidden { floatingClose }
+                    if barHidden {
+                        FloatingCloseButton(
+                            platformName: platform.name,
+                            onClose: { close() }
+                        )
+                    }
                 }
                 // Full screen, the page sits in a rounded glass-edged frame over the neon backdrop;
                 // while browsing (and in the mini-player) it goes edge to edge instead.
@@ -113,7 +118,7 @@ struct PlatformScreen: View {
             .position(minimized
                       ? miniCenter(in: geo.size, dragging: miniDrag)
                       : CGPoint(x: geo.size.width / 2, y: geo.size.height / 2))
-            .gesture(miniDragGesture(in: geo.size), including: minimized ? .all : .subviews)
+            .gesture(miniDragGesture(in: geo.size), including: minimized ? .all : .none)
         }
         // While browsing, the page runs to the bottom edge behind the home indicator, as in Safari.
         // The top stays clear of the status bar so the time and battery stay readable.
@@ -137,26 +142,6 @@ struct PlatformScreen: View {
         }
         .sheet(isPresented: $showQuickPost) { QuickPostSheet(platformName: platform.name) }
         .sheet(isPresented: $showAccounts) { AccountsScreen(platform: platform) }
-    }
-
-    /// The one control left while browsing full screen.
-    private var floatingClose: some View {
-        Button { close() } label: {
-            Image(systemName: "xmark")
-                .font(TypeRole.body.weight(.semibold))
-                .foregroundStyle(Theme.color.text)
-                .frame(width: 36, height: 36)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .frame(width: Layout.minTap, height: Layout.minTap)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // Sits just below the sites' own top bars (about 48–56pt on YouTube, YouTube Music and
-        // Instagram), so it doesn't cover their logo or menu button in the corner.
-        .padding(.leading, Space.s8)
-        .padding(.top, Space.s48 + Space.s8)
-        .accessibilityLabel("Close \(platform.name)")
-        .transition(.opacity.combined(with: .scale(scale: 0.8)))
     }
 
     // MARK: - Mini-player
@@ -277,6 +262,29 @@ struct PlatformScreen: View {
         // after the app relaunches. Credentials remain managed by the website.
         try? context.save()
         return created
+    }
+}
+
+/// The single control left when QuietFeed's browser header is hidden.
+private struct FloatingCloseButton: View {
+    let platformName: String
+    let onClose: () -> Void
+
+    var body: some View {
+        Button(action: onClose) {
+            Image(systemName: "xmark")
+                .font(TypeRole.body.weight(.semibold))
+                .foregroundStyle(Theme.color.text)
+                .frame(width: 36, height: 36)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .frame(width: Layout.minTap, height: Layout.minTap)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, Space.s8)
+        .padding(.top, Space.s8)
+        .accessibilityLabel("Close \(platformName)")
+        .transition(.opacity.combined(with: .scale(scale: 0.8)))
     }
 }
 
