@@ -8,13 +8,22 @@
 
   var STYLE_ID = 'stillfeed-style';
   var HIDDEN = 'data-stillfeed-hidden';
+  // Marks elements a plain CSS rule hides once they've been counted for weekly insights.
+  var COUNTED = 'data-stillfeed-counted';
   var SINGLE = 'stillfeed-single';
   var state = { rules: [], locked: false, lastPath: null, timer: null, observer: null, adTimer: null, adSanitizerInstalled: false };
 
   // Remove ad scheduling data before YouTube's player consumes its JSON response.
   // The visual/player-state skipper below remains as a fallback when the response shape changes.
-  function stripPlayerAds(value, seen) {
+  // Ad fields sit near the top of YouTube's player data (at most a couple of levels down, e.g.
+  // inside a page's playerResponse), so the walk stops after a few levels. Walking every object
+  // in every large response made each JSON.parse several times slower and the page stutter.
+  var AD_SEARCH_DEPTH = 5;
+
+  function stripPlayerAds(value, seen, depth) {
     if (!value || typeof value !== 'object') return value;
+    depth = depth || 0;
+    if (depth > AD_SEARCH_DEPTH) return value;
     seen = seen || new WeakSet();
     if (seen.has(value)) return value;
     seen.add(value);
@@ -28,10 +37,10 @@
     }
 
     if (Array.isArray(value)) {
-      for (var j = 0; j < value.length; j++) stripPlayerAds(value[j], seen);
+      for (var j = 0; j < value.length; j++) stripPlayerAds(value[j], seen, depth + 1);
     } else {
       Object.keys(value).forEach(function (key) {
-        stripPlayerAds(value[key], seen);
+        stripPlayerAds(value[key], seen, depth + 1);
       });
     }
     return value;
@@ -134,9 +143,22 @@
     state.timer = null;
     var hidden = 0;
     state.rules.forEach(function (r) {
-      if (!r.text.length || !r.selectors.length) return;
+      if (!r.selectors.length) return;
       if (r.action !== 'hide' && r.action !== 'remove') return;
       var nodes = document.querySelectorAll(r.selectors.join(','));
+      if (!r.text.length) {
+        // Plain CSS already hides these (writeStyle); count each one once for weekly insights.
+        // Results come in document order, so an outer match is marked before anything inside it,
+        // and an ad slot inside its already-counted feed item isn't counted twice.
+        for (var j = 0; j < nodes.length; j++) {
+          var node = nodes[j];
+          if (node.hasAttribute(COUNTED)) continue;
+          var insideCounted = node.parentElement && node.parentElement.closest('[' + COUNTED + ']');
+          node.setAttribute(COUNTED, '');
+          if (!insideCounted) hidden++;
+        }
+        return;
+      }
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
         if (n.hasAttribute(HIDDEN)) continue;

@@ -71,11 +71,21 @@ struct PlatformScreen: View {
                     if minimized { miniControls }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Full screen, the page sits in a rounded glass-edged frame over the neon backdrop.
+                .background(Theme.color.bg)
+                .clipShape(RoundedRectangle(cornerRadius: minimized ? 0 : Radius.lg, style: .continuous))
+                .overlay {
+                    if !minimized { glassEdge(cornerRadius: Radius.lg) }
+                }
+                .padding([.horizontal, .bottom], minimized ? 0 : Space.s8)
             }
             .frame(width: minimized ? MiniPlayer.size.width : geo.size.width,
                    height: minimized ? MiniPlayer.size.height : geo.size.height)
-            .background(Theme.color.bg)
+            .background(minimized ? Theme.color.bg : .clear)
             .clipShape(RoundedRectangle(cornerRadius: minimized ? Radius.md : 0, style: .continuous))
+            .overlay {
+                if minimized { glassEdge(cornerRadius: Radius.md) }
+            }
             .shadow(color: minimized ? Shadow.pop.color : .clear, radius: Shadow.pop.radius, y: Shadow.pop.y)
             .position(minimized
                       ? miniCenter(in: geo.size, dragging: miniDrag)
@@ -84,14 +94,18 @@ struct PlatformScreen: View {
         }
         // Full screen covers the tabs edge to edge; the mini-player leaves them visible and usable.
         .background {
-            if !session.isMinimized { Theme.color.bg.ignoresSafeArea() }
+            if !session.isMinimized { AuroraBackground() }
         }
         .task { start() }
         .onChange(of: toggles) { _, new in
             model?.updateRules(ruleStore.enabledRules(for: platform.id, toggles: new))
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
+        .onChange(of: scenePhase) { previous, phase in
+            // Leaving goes active → inactive → background. Note what's playing while still
+            // inactive (nothing is paused yet), then resume only that once in the background.
+            if previous == .active && phase == .inactive {
+                model?.notePlaybackBeforeBackground()
+            } else if phase == .background {
                 model?.continuePlaybackInBackground()
             }
         }
@@ -136,10 +150,22 @@ struct PlatformScreen: View {
             Image(systemName: symbol)
                 .font(TypeRole.footnote.weight(.semibold))
                 .frame(width: Layout.minTap, height: Layout.minTap)
-                .background(.ultraThinMaterial, in: Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
         }
+        .buttonStyle(.plain)
         .foregroundStyle(Theme.color.text)
         .accessibilityLabel(label)
+    }
+
+    /// The light rim Liquid Glass panels have, drawn around the page and the mini-player.
+    private func glassEdge(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .strokeBorder(
+                LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.08), Neon.teal.opacity(0.25)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                lineWidth: 1
+            )
+            .allowsHitTesting(false)
     }
 
     /// Where the mini-player's centre sits: its resting corner, moved by any drag in progress.

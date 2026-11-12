@@ -242,50 +242,80 @@ struct WebTopBar: View {
     var onAccount: () -> Void = {}
     var onReload: () -> Void = {}
 
+    /// Each control is its own piece of Liquid Glass floating over the backdrop, rather than
+    /// a solid bar. Glass shapes are 36pt, inside full 44pt tap targets.
     var body: some View {
-        HStack(spacing: Space.s8) {
-            if showsBack {
-                Button(action: onBack) { Image(systemName: "chevron.backward") }
-                    .frame(width: Layout.minTap, height: Layout.minTap)
-                    .accessibilityLabel("Back to chat")
-            } else if let onClose {
-                Button(action: onClose) { Image(systemName: "xmark") }
-                    .frame(width: Layout.minTap, height: Layout.minTap)
-                    .accessibilityLabel("Close")
-            }
-            Button(action: onAccount) {
-                HStack(spacing: Space.s4) {
-                    Text(title).font(TypeRole.headline)
-                    if let accountLabel {
-                        Text("· \(accountLabel)").font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
-                    }
-                    Image(systemName: "chevron.down").font(.caption2)
+        GlassEffectContainer(spacing: Space.s4) {
+            HStack(spacing: Space.s8) {
+                if showsBack {
+                    glassIcon("chevron.backward", label: "Back to chat", action: onBack)
+                } else if let onClose {
+                    glassIcon("xmark", label: "Close", action: onClose)
                 }
-            }
-            .accessibilityHint("Switch account")
-            Spacer()
-            if let onPost {
-                Button("Post", action: onPost)
-                    .font(TypeRole.footnote.weight(.semibold))
+                Button(action: onAccount) {
+                    // Drops the account name before it ever cuts off the platform's name.
+                    ViewThatFits(in: .horizontal) {
+                        titleLabel(showingAccount: true)
+                        titleLabel(showingAccount: false)
+                    }
                     .padding(.horizontal, Space.s12)
+                    .frame(minHeight: 36)
+                    .glassEffect(.regular.interactive(), in: .capsule)
                     .frame(minHeight: Layout.minTap)
-                    .foregroundStyle(Theme.color.accent)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Switch account")
+                // The title takes the free space before the spacer does.
+                .layoutPriority(1)
+                Spacer(minLength: 0)
+                if let onPost {
+                    Button(action: onPost) {
+                        Text("Post")
+                            .font(TypeRole.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.color.accent)
+                            .padding(.horizontal, Space.s12)
+                            .frame(minHeight: 36)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .frame(minHeight: Layout.minTap)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     .accessibilityHint("Opens the real app for 10 minutes")
+                }
+                if let onMinimize {
+                    glassIcon("pip.enter", label: "Shrink to mini player", action: onMinimize)
+                }
+                glassIcon("arrow.clockwise", label: "Reload", action: onReload)
             }
-            if let onMinimize {
-                Button(action: onMinimize) { Image(systemName: "pip.enter") }
-                    .frame(width: Layout.minTap, height: Layout.minTap)
-                    .accessibilityLabel("Shrink to mini player")
-            }
-            Button(action: onReload) { Image(systemName: "arrow.clockwise") }
-                .frame(width: Layout.minTap, height: Layout.minTap)
-                .accessibilityLabel("Reload")
         }
         .foregroundStyle(Theme.color.text)
         .padding(.horizontal, Space.s8)
-        .frame(height: Layout.webTopBar)
-        .background(Theme.color.bg)
-        .overlay(alignment: .bottom) { Theme.color.border.frame(height: 1) }
+        .frame(height: Layout.webTopBar + Space.s8)
+    }
+
+    private func titleLabel(showingAccount: Bool) -> some View {
+        HStack(spacing: Space.s4) {
+            Text(title).font(TypeRole.headline)
+            if showingAccount, let accountLabel {
+                Text("· \(accountLabel)").font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
+            }
+            Image(systemName: "chevron.down").font(.caption2)
+        }
+        .lineLimit(1)
+    }
+
+    private func glassIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(TypeRole.body.weight(.semibold))
+                .frame(width: 36, height: 36)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .frame(width: Layout.minTap, height: Layout.minTap)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 

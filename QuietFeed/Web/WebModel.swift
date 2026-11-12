@@ -119,16 +119,40 @@ final class WebModel: NSObject {
         """)
     }
 
-    func continuePlaybackInBackground() {
-        guard platform.id == "youtube" || platform.id == "youtube_music" else { return }
-        AVAudioSession.sharedInstance().activate { _, _ in }
-        webView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
-        let source = """
+    private var playsInBackground: Bool { platform.id == "youtube" || platform.id == "youtube_music" }
+
+    /// Called as the app starts leaving the foreground, before iOS pauses anything: remembers
+    /// which media the person actually has playing, so a paused song stays paused.
+    func notePlaybackBeforeBackground() {
+        guard playsInBackground else { return }
+        webView.evaluateJavaScript("""
         document.querySelectorAll('video, audio').forEach(function (media) {
-          if (media.currentTime > 0 && !media.ended) media.play().catch(function () {});
+          media.__quietfeedWasPlaying = !media.paused && !media.ended;
         });
+        """)
+    }
+
+    /// Called once the app is in the background: keeps going only what was playing a moment ago.
+    /// The audio session is activated only then, because a playback session interrupts other
+    /// apps' audio, and leaving QuietFeed with a paused video shouldn't stop someone's music.
+    func continuePlaybackInBackground() {
+        guard playsInBackground else { return }
+        let source = """
+        (function () {
+          var resumed = 0;
+          document.querySelectorAll('video, audio').forEach(function (media) {
+            if (!media.__quietfeedWasPlaying) return;
+            resumed++;
+            if (media.paused) media.play().catch(function () {});
+          });
+          return resumed;
+        })();
         """
-        webView.evaluateJavaScript(source)
+        webView.evaluateJavaScript(source) { [weak self] result, _ in
+            guard let self, let resumed = result as? Int, resumed > 0 else { return }
+            AVAudioSession.sharedInstance().activate { _, _ in }
+            self.webView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
+        }
     }
 
     /// Called when a switch changes on the Filters screen. Applies to the open page at once.
