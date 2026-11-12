@@ -12,6 +12,9 @@ final class WebModel: NSObject {
     private(set) var state: WebState = .loading(progress: 0)
     private(set) var isSingleItem = false
     private(set) var canGoBack = false
+    /// True while the person is scrolling down through the page: the screen hides its own bar
+    /// and margins so the site gets the whole screen, leaving just a Close button.
+    private(set) var isImmersive = false
 
     @ObservationIgnored private(set) var webView: WKWebView!
     @ObservationIgnored private var navGuard: NavigationGuard
@@ -19,6 +22,10 @@ final class WebModel: NSObject {
     @ObservationIgnored private let startURL: URL?
     @ObservationIgnored private let insights: WeeklyInsightsStore
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+    @ObservationIgnored private var lastScrollY: CGFloat = 0
+    /// How far the current scroll has gone in one direction (positive = down the page).
+    @ObservationIgnored private var scrollRun: CGFloat = 0
+    @ObservationIgnored private var refreshControl: UIRefreshControl?
 
     private static let engineSource: String = {
         guard let url = Bundle.main.url(forResource: "FilterEngine", withExtension: "js"),
@@ -62,6 +69,12 @@ final class WebModel: NSObject {
         view.isInspectable = true
         #endif
 
+        // Pull down at the top of the page to reload, since Reload is out of sight while browsing.
+        let refresh = UIRefreshControl()
+        refresh.addAction(UIAction { [weak self] _ in self?.reload() }, for: .valueChanged)
+        view.scrollView.refreshControl = refresh
+        refreshControl = refresh
+
         observations = [
             view.observe(\.estimatedProgress, options: [.new]) { [weak self] _, change in
                 let value = change.newValue ?? 0
@@ -79,6 +92,12 @@ final class WebModel: NSObject {
                 let value = change.newValue ?? false
                 MainActor.assumeIsolated {
                     self?.canGoBack = value
+                }
+            },
+            view.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, change in
+                let y = change.newValue?.y ?? 0
+                MainActor.assumeIsolated {
+                    self?.scrolled(to: y)
                 }
             }
         ]
@@ -100,6 +119,7 @@ final class WebModel: NSObject {
 
     func reload() {
         state = .loading(progress: 0)
+        isImmersive = false
         if webView.url == nil { loadHome() } else { webView.reload() }
     }
 
@@ -262,6 +282,37 @@ final class WebModel: NSObject {
 
     private func urlChanged(_ url: URL?) {
         isSingleItem = navGuard.isSingleItem(url: url)
+        // A new page starts with the bar showing, so there's never a page without controls.
+        isImmersive = false
+    }
+
+    /// Hides the bar after scrolling ~30pt down the page, and shows it after ~40pt back up or
+    /// near the top, as Safari does. Distance is added up over the whole scroll in one direction
+    /// (offset updates arrive every frame, a few points at a time). Only the person's own
+    /// scrolling counts: when the bar hides the page gets taller and its offset can shift,
+    /// and reacting to that would make the bar flicker.
+    private func scrolled(to y: CGFloat) {
+        let scrollView = webView.scrollView
+        let delta = y - lastScrollY
+        lastScrollY = y
+        guard scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating else {
+            scrollRun = 0
+            return
+        }
+        // Keep adding while the direction holds; start over when it reverses.
+        scrollRun = (delta >= 0) == (scrollRun >= 0) ? scrollRun + delta : delta
+
+        let immersive: Bool
+        if y < 40 {
+            immersive = false
+        } else if scrollRun > 30 {
+            immersive = true
+        } else if scrollRun < -40 {
+            immersive = false
+        } else {
+            return
+        }
+        if immersive != isImmersive { isImmersive = immersive }
     }
 
     fileprivate func handleMessage(_ body: Any) {
@@ -274,6 +325,7 @@ final class WebModel: NSObject {
     }
 
     private func fail(_ error: Error) {
+        refreshControl?.endRefreshing()
         let code = (error as NSError).code
         if code == NSURLErrorCancelled { return }
         // 102: "frame load interrupted" is what WebKit reports when we cancel a load ourselves.
@@ -307,6 +359,7 @@ extension WebModel: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         state = .loaded
+        refreshControl?.endRefreshing()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

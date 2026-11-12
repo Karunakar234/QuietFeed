@@ -2,6 +2,7 @@
 // It takes rules as DATA (selectors, URL patterns, text patterns, one action from a
 // fixed set) and never evaluates code that arrives from the server.
 // Actions: hide | remove | redirect | block_navigation | disable_scroll | skip_ads
+//          | autohide_top | autohide_bottom
 (function () {
   'use strict';
   if (window.__stillfeed) return;
@@ -242,9 +243,71 @@
     }
   }
 
+  // MARK: autohide_top / autohide_bottom
+  // While the person scrolls down, slide the site's own top and/or bottom bar out of view so
+  // the page fills the screen; scrolling up, reaching the top, or a new page brings them back.
+  // The bars are found by what's pinned to the screen edge rather than by site-specific
+  // selectors, so it works on any platform. Anything taller than a fifth of the screen is left
+  // alone (YouTube's pinned video player, dialogs). Moving them with `translate` doesn't change
+  // the page's layout, so hiding can't shift the scroll position.
+  var chrome = { hidden: false, lastY: 0, run: 0, bars: [] };
+
+  function chromeEdges() {
+    var edges = { top: false, bottom: false };
+    state.rules.forEach(function (r) {
+      if (r.action === 'autohide_top') edges.top = true;
+      if (r.action === 'autohide_bottom') edges.bottom = true;
+    });
+    return edges;
+  }
+  function pinnedBarsAt(y) {
+    var found = [];
+    [0.15, 0.5, 0.85].forEach(function (fx) {
+      var el = document.elementFromPoint(window.innerWidth * fx, y);
+      while (el && el !== document.body && el !== document.documentElement) {
+        var position = window.getComputedStyle(el).position;
+        if (position === 'fixed' || position === 'sticky') {
+          var box = el.getBoundingClientRect();
+          if (box.height > 0 && box.height < window.innerHeight * 0.2 && found.indexOf(el) === -1) found.push(el);
+          break;
+        }
+        el = el.parentElement;
+      }
+    });
+    return found;
+  }
+  function hideChrome() {
+    var edges = chromeEdges();
+    chrome.bars = [];
+    if (edges.top) pinnedBarsAt(2).forEach(function (el) { chrome.bars.push({ el: el, offset: '0 -110%' }); });
+    if (edges.bottom) pinnedBarsAt(window.innerHeight - 2).forEach(function (el) { chrome.bars.push({ el: el, offset: '0 110%' }); });
+    chrome.bars.forEach(function (bar) {
+      bar.el.style.setProperty('transition', 'translate 0.25s ease', 'important');
+      bar.el.style.setProperty('translate', bar.offset, 'important');
+    });
+    chrome.hidden = true;
+  }
+  function showChrome() {
+    chrome.bars.forEach(function (bar) { bar.el.style.removeProperty('translate'); });
+    chrome.bars = [];
+    chrome.hidden = false;
+  }
+  function chromeScrolled() {
+    var y = window.scrollY;
+    var delta = y - chrome.lastY;
+    chrome.lastY = y;
+    var edges = chromeEdges();
+    if (!edges.top && !edges.bottom) { if (chrome.hidden) showChrome(); return; }
+    // Same feel as QuietFeed's own bar: ~30pt down hides, ~40pt up or near the top shows.
+    chrome.run = (delta >= 0) === (chrome.run >= 0) ? chrome.run + delta : delta;
+    if (y < 40 || chrome.run < -40) { if (chrome.hidden) showChrome(); }
+    else if (chrome.run > 30 && !chrome.hidden) hideChrome();
+  }
+
   function checkLocation() {
     var path = currentPath();
     state.lastPath = path;
+    if (chrome.hidden) showChrome();
     var dest = destinationFor(path);
     if (dest) {
       post({ type: 'blocked', path: window.location.pathname });
@@ -301,6 +364,9 @@
     checkLocation();
     updateAdSkipping();
     scheduleScan();
+    // A switch changed on the Filters screen: put the site's bars back; the next scroll
+    // hides whichever ones are still switched on.
+    if (chrome.hidden) showChrome();
   }
 
   window.__stillfeed = {
@@ -311,6 +377,7 @@
       window.addEventListener('touchmove', blockScroll, { capture: true, passive: false });
       window.addEventListener('keydown', blockKeys, true);
       document.addEventListener('click', interceptClick, true);
+      window.addEventListener('scroll', chromeScrolled, { passive: true });
       state.observer = new MutationObserver(scheduleScan);
       state.observer.observe(document.documentElement, { childList: true, subtree: true });
       document.addEventListener('DOMContentLoaded', function () { writeStyle(); scheduleScan(); });

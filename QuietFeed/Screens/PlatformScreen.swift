@@ -38,6 +38,19 @@ struct PlatformScreen: View {
         var isLeading = false
     }
 
+    /// The tile's "while scrolling" switches on the Filters screen.
+    private var enabledKeys: Set<String> {
+        Set(ruleStore.enabledRules(for: platform.id, toggles: toggles).map(\.key))
+    }
+    private var hidesHeader: Bool { enabledKeys.contains("hide_header") }
+    private var hidesFooter: Bool { enabledKeys.contains("hide_footer") }
+
+    /// Scrolling down with either switch on: the page fills the screen edge to edge.
+    /// (The site's own bars are slid away by FilterEngine.js.)
+    private var isBrowsingFullScreen: Bool {
+        !session.isMinimized && (model?.isImmersive ?? false) && (hidesHeader || hidesFooter)
+    }
+
     private var toggles: [String: Bool] {
         settings.first { $0.platformID == platform.id }?.ruleToggles ?? [:]
     }
@@ -45,8 +58,12 @@ struct PlatformScreen: View {
     var body: some View {
         GeometryReader { geo in
             let minimized = session.isMinimized
+            // Scrolling down a page hides the margins (either switch) and QuietFeed's bar
+            // (Hide header), so the site has the whole screen.
+            let fullBleed = isBrowsingFullScreen
+            let barHidden = fullBleed && hidesHeader
             VStack(spacing: 0) {
-                if !minimized {
+                if !minimized && !barHidden {
                     WebTopBar(
                         title: platform.name,
                         accountLabel: accountLabel,
@@ -59,6 +76,7 @@ struct PlatformScreen: View {
                         onReload: { model?.reload() }
                     )
                     .gesture(swipeDownToMinimize)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 ZStack {
                     if let model {
@@ -71,14 +89,19 @@ struct PlatformScreen: View {
                     if minimized { miniControls }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Full screen, the page sits in a rounded glass-edged frame over the neon backdrop.
-                .background(Theme.color.bg)
-                .clipShape(RoundedRectangle(cornerRadius: minimized ? 0 : Radius.lg, style: .continuous))
-                .overlay {
-                    if !minimized { glassEdge(cornerRadius: Radius.lg) }
+                .overlay(alignment: .topLeading) {
+                    if barHidden { floatingClose }
                 }
-                .padding([.horizontal, .bottom], minimized ? 0 : Space.s8)
+                // Full screen, the page sits in a rounded glass-edged frame over the neon backdrop;
+                // while browsing (and in the mini-player) it goes edge to edge instead.
+                .background(Theme.color.bg)
+                .clipShape(RoundedRectangle(cornerRadius: minimized || fullBleed ? 0 : Radius.lg, style: .continuous))
+                .overlay {
+                    if !minimized && !fullBleed { glassEdge(cornerRadius: Radius.lg) }
+                }
+                .padding([.horizontal, .bottom], minimized || fullBleed ? 0 : Space.s8)
             }
+            .animation(Motion.spring, value: fullBleed)
             .frame(width: minimized ? MiniPlayer.size.width : geo.size.width,
                    height: minimized ? MiniPlayer.size.height : geo.size.height)
             .background(minimized ? Theme.color.bg : .clear)
@@ -92,6 +115,9 @@ struct PlatformScreen: View {
                       : CGPoint(x: geo.size.width / 2, y: geo.size.height / 2))
             .gesture(miniDragGesture(in: geo.size), including: minimized ? .all : .subviews)
         }
+        // While browsing, the page runs to the bottom edge behind the home indicator, as in Safari.
+        // The top stays clear of the status bar so the time and battery stay readable.
+        .ignoresSafeArea(.container, edges: isBrowsingFullScreen ? .bottom : [])
         // Full screen covers the tabs edge to edge; the mini-player leaves them visible and usable.
         .background {
             if !session.isMinimized { AuroraBackground() }
@@ -111,6 +137,26 @@ struct PlatformScreen: View {
         }
         .sheet(isPresented: $showQuickPost) { QuickPostSheet(platformName: platform.name) }
         .sheet(isPresented: $showAccounts) { AccountsScreen(platform: platform) }
+    }
+
+    /// The one control left while browsing full screen.
+    private var floatingClose: some View {
+        Button { close() } label: {
+            Image(systemName: "xmark")
+                .font(TypeRole.body.weight(.semibold))
+                .foregroundStyle(Theme.color.text)
+                .frame(width: 36, height: 36)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .frame(width: Layout.minTap, height: Layout.minTap)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Sits just below the sites' own top bars (about 48–56pt on YouTube, YouTube Music and
+        // Instagram), so it doesn't cover their logo or menu button in the corner.
+        .padding(.leading, Space.s8)
+        .padding(.top, Space.s48 + Space.s8)
+        .accessibilityLabel("Close \(platform.name)")
+        .transition(.opacity.combined(with: .scale(scale: 0.8)))
     }
 
     // MARK: - Mini-player
