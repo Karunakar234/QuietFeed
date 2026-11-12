@@ -81,6 +81,15 @@ final class WeeklyInsightsStore {
         persist()
     }
 
+    /// Deletes the saved file and starts this week over at zero ("Delete my data" in Settings).
+    func reset() {
+        try? fileManager.removeItem(at: fileURL)
+        snapshot = WeeklyInsightSnapshot(
+            weekStart: Self.weekStart(for: .now, calendar: calendar),
+            dailyHiddenCounts: Array(repeating: 0, count: 7)
+        )
+    }
+
     private func persist() {
         do {
             try fileManager.createDirectory(

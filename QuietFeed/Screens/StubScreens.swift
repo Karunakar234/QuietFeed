@@ -124,10 +124,14 @@ struct AccountsScreen: View {
 
 struct SettingsScreen: View {
     @Environment(\.modelContext) private var context
+    @Environment(PlayerSession.self) private var session
+    @Environment(WeeklyInsightsStore.self) private var insights
     @Query(sort: \PlatformSetting.sortOrder) private var settings: [PlatformSetting]
     @Query private var accounts: [Account]
     @AppStorage("didOnboard") private var didOnboard = false
     @State private var confirmDelete = false
+    @State private var confirmDeleteInsights = false
+    @State private var isDeleting = false
 
     var body: some View {
         GlassScreen(
@@ -137,11 +141,28 @@ struct SettingsScreen: View {
         ) {
             VStack(spacing: Space.s16) {
                 SettingsPlatformsCard(settings: settings)
-                SettingsDataCard {
-                    confirmDelete = true
-                }
+                SettingsDataCard(
+                    deleteInsightsAction: {
+                        confirmDeleteInsights = true
+                    },
+                    deleteAction: {
+                        confirmDelete = true
+                    }
+                )
                 SettingsAboutCard()
             }
+        }
+        .confirmationDialog(
+            "Delete weekly insight data?",
+            isPresented: $confirmDeleteInsights,
+            titleVisibility: .visible
+        ) {
+            Button("Delete weekly insight data", role: .destructive) {
+                insights.reset()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will reset your count of filtered items for this week back to zero.")
         }
         .confirmationDialog(
             "Delete everything QuietFeed has stored on this phone?",
@@ -155,15 +176,41 @@ struct SettingsScreen: View {
         }
     }
 
+    /// Puts QuietFeed back the way it was on first launch: signs out of every platform by deleting
+    /// all website data, clears this week's insights, resets every platform and filter switch,
+    /// and goes back to onboarding.
     private func deleteEverything() async {
-        for account in accounts {
-            try? await WKWebsiteDataStore.remove(forIdentifier: account.id)
-            context.delete(account)
+        guard !isDeleting else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+
+        // An open or mini-player page keeps its website data in use, and WebKit won't delete data
+        // that's in use (the old version failed silently here), so close it first and give
+        // WebKit a moment to release it.
+        session.close()
+        try? await Task.sleep(for: .milliseconds(300))
+
+        // Every account's data store, including any left behind without an account record.
+        var stores = Set(accounts.map(\.id))
+        stores.formUnion(await WKWebsiteDataStore.allDataStoreIdentifiers)
+        var stillInUse: [UUID] = []
+        for id in stores {
+            do { try await WKWebsiteDataStore.remove(forIdentifier: id) } catch { stillInUse.append(id) }
         }
+        if !stillInUse.isEmpty {
+            try? await Task.sleep(for: .seconds(1))
+            for id in stillInUse { try? await WKWebsiteDataStore.remove(forIdentifier: id) }
+        }
+        await WKWebsiteDataStore.default().removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+
+        for account in accounts { context.delete(account) }
         for setting in settings {
             setting.isEnabled = false
             setting.ruleToggles = [:]
         }
+        try? context.save()
+        insights.reset()
         didOnboard = false
     }
 }
@@ -199,16 +246,30 @@ private struct SettingsPlatformsCard: View {
 }
 
 private struct SettingsDataCard: View {
+    let deleteInsightsAction: () -> Void
     let deleteAction: () -> Void
 
     var body: some View {
         GlassSectionCard("Your data", symbol: "externaldrive.fill") {
-            Text("Signs you out everywhere in QuietFeed and resets your settings. Your Instagram and YouTube accounts aren't touched.")
-                .font(TypeRole.footnote)
-                .foregroundStyle(.white.opacity(0.65))
+            VStack(alignment: .leading, spacing: Space.s12) {
+                Text("Resets the count of items filtered this week back to zero.")
+                    .font(TypeRole.footnote)
+                    .foregroundStyle(.white.opacity(0.65))
 
-            Button("Delete my data", role: .destructive, action: deleteAction)
-                .buttonStyle(.app(.danger, .md))
+                Button("Delete weekly insight data", role: .destructive, action: deleteInsightsAction)
+                    .buttonStyle(.app(.secondary, .md))
+
+                Divider()
+                    .overlay(.white.opacity(0.12))
+                    .padding(.vertical, Space.s4)
+
+                Text("Signs you out of every platform in QuietFeed, clears your weekly insights and resets every switch, as on first launch. Your Instagram and YouTube accounts themselves aren't touched.")
+                    .font(TypeRole.footnote)
+                    .foregroundStyle(.white.opacity(0.65))
+
+                Button("Delete my data", role: .destructive, action: deleteAction)
+                    .buttonStyle(.app(.danger, .md))
+            }
         }
     }
 }

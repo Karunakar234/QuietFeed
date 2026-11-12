@@ -11,7 +11,17 @@ struct RootView: View {
     var body: some View {
         Group {
             if !ruleStore.isLoaded {
-                ProgressView().accessibilityLabel("Loading")
+                VStack(spacing: Space.s12) {
+                    ProgressView()
+                    Text("Preparing your quieter feed")
+                        .font(TypeRole.footnote)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                .padding(Space.s24)
+                .glassEffect(.regular, in: .rect(cornerRadius: Radius.lg))
+                .background { AuroraBackground() }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Loading")
             } else if didOnboard {
                 MainTabs()
                     // The open platform sits above the tabs, full screen or as the mini-player.
@@ -60,5 +70,6 @@ struct MainTabs: View {
             Tab("Stats", systemImage: "chart.bar", value: .stats) { StatsScreen() }
             Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsScreen() }
         }
+        .tint(Neon.teal)
     }
 }

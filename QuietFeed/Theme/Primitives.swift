@@ -29,9 +29,8 @@ struct AppButtonStyle: ButtonStyle {
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        let bg = palette.bg
         let fg = palette.fg
-        let stroke = palette.stroke
+        let shape = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
         ZStack {
             configuration.label.opacity(isLoading ? 0 : 1)   // label stays in the tree for VoiceOver
             if isLoading { ProgressView().tint(fg) }
@@ -40,14 +39,23 @@ struct AppButtonStyle: ButtonStyle {
         .foregroundStyle(fg)
         .frame(maxWidth: .infinity, minHeight: max(size.height, Layout.minTap))
         .padding(.horizontal, Space.s16)
-        .background(bg, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay {
-            if let stroke { RoundedRectangle(cornerRadius: Radius.md, style: .continuous).strokeBorder(stroke) }
-        }
+        .contentShape(shape)
+        .glassEffect(glass, in: shape)
         .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
         .scaleEffect(configuration.isPressed ? 0.98 : 1)
         .animation(.easeOut(duration: Motion.fast), value: configuration.isPressed)
         .accessibilityAddTraits(isLoading ? .updatesFrequently : [])
+    }
+
+    private var glass: Glass {
+        switch variant {
+        case .primary:
+            .regular.tint(Theme.color.accent).interactive()
+        case .danger:
+            .regular.tint(Theme.color.danger).interactive()
+        case .secondary, .ghost:
+            .regular.interactive()
+        }
     }
 }
 
@@ -92,17 +100,27 @@ struct PlatformTile: View {
                     if isSelected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.color.accent) }
                 }
                 Spacer(minLength: Space.s12)
-                Text(name).font(TypeRole.headline).foregroundStyle(Theme.color.text)
+                Text(name)
+                    .font(TypeRole.headline)
+                    .foregroundStyle(Theme.color.text)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
                 if let subtitle {
-                    Text(subtitle).font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
+                    Text(subtitle)
+                        .font(TypeRole.footnote)
+                        .foregroundStyle(Theme.color.textMuted)
+                        .lineLimit(2)
                 }
             }
             .padding(Space.s16)
             .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
-            .background(Theme.color.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(isSelected ? Theme.color.accent : Theme.color.border, lineWidth: isSelected ? 2 : 1))
-            .themeShadow(Shadow.card)
+            .contentShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .glassEffect(
+                isSelected
+                    ? .regular.tint(Theme.color.accent.opacity(0.26)).interactive()
+                    : .regular.interactive(),
+                in: .rect(cornerRadius: Radius.lg)
+            )
             .opacity(state == .disabled ? 0.45 : 1)
         }
         .buttonStyle(.plain)
@@ -360,7 +378,7 @@ struct StatCard: View {
         }
         .padding(Space.s16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.color.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
         .accessibilityElement(children: .combine)
     }
 }
@@ -402,8 +420,7 @@ struct Banner: View {
             }
         }
         .padding(Space.s12)
-        .background(Theme.color.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .themeShadow(Shadow.pop)
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
         .padding(.horizontal, Space.s16)
         .accessibilityElement(children: .combine)
     }
@@ -430,6 +447,7 @@ struct EmptyState: View {
         }
         .padding(Space.s24)
         .frame(maxWidth: Layout.maxReadableWidth)
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.lg))
     }
 }
 
