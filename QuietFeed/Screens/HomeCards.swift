@@ -73,7 +73,11 @@ struct GlassScreen<Content: View>: View {
             }
             .scrollIndicators(.hidden)
             .background { AuroraBackground() }
+            #if os(macOS)
+            .toolbar(.hidden, for: .windowToolbar)
+            #else
             .toolbar(.hidden, for: .navigationBar)
+            #endif
         }
     }
 }

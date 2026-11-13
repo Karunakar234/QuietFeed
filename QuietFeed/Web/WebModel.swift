@@ -1,7 +1,11 @@
 import AVFAudio
 import Foundation
 import Observation
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import WebKit
 
 /// Owns one filtered web view: one platform, one account, the rules that are switched on.
@@ -25,7 +29,9 @@ final class WebModel: NSObject {
     @ObservationIgnored private var lastScrollY: CGFloat = 0
     /// How far the current scroll has gone in one direction (positive = down the page).
     @ObservationIgnored private var scrollRun: CGFloat = 0
+    #if canImport(UIKit)
     @ObservationIgnored private var refreshControl: UIRefreshControl?
+    #endif
 
     private static let engineSource: String = {
         guard let url = Bundle.main.url(forResource: "FilterEngine", withExtension: "js"),
@@ -51,8 +57,10 @@ final class WebModel: NSObject {
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = WKWebsiteDataStore(forIdentifier: dataStoreID)
+        #if !os(macOS)
         config.allowsInlineMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
+        #endif
         config.allowsAirPlayForMediaPlayback = true
         // Present as ordinary mobile Safari so sign-in pages behave as they do there.
         config.applicationNameForUserAgent = "Version/17.0 Mobile/15E148 Safari/604.1"
@@ -69,13 +77,15 @@ final class WebModel: NSObject {
         view.isInspectable = true
         #endif
 
+        #if canImport(UIKit)
         // Pull down at the top of the page to reload, since Reload is out of sight while browsing.
         let refresh = UIRefreshControl()
         refresh.addAction(UIAction { [weak self] _ in self?.reload() }, for: .valueChanged)
         view.scrollView.refreshControl = refresh
         refreshControl = refresh
+        #endif
 
-        observations = [
+        var obs = [
             view.observe(\.estimatedProgress, options: [.new]) { [weak self] _, change in
                 let value = change.newValue ?? 0
                 MainActor.assumeIsolated {
@@ -93,14 +103,17 @@ final class WebModel: NSObject {
                 MainActor.assumeIsolated {
                     self?.canGoBack = value
                 }
-            },
-            view.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, change in
-                let y = change.newValue?.y ?? 0
-                MainActor.assumeIsolated {
-                    self?.scrolled(to: y)
-                }
             }
         ]
+        #if canImport(UIKit)
+        obs.append(view.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, change in
+            let y = change.newValue?.y ?? 0
+            MainActor.assumeIsolated {
+                self?.scrolled(to: y)
+            }
+        })
+        #endif
+        observations = obs
         // Load only after the ad rules are attached, so the first page request is filtered too.
         Task { @MainActor in
             await AdBlocker.install(into: config.userContentController)
@@ -170,7 +183,9 @@ final class WebModel: NSObject {
         """
         webView.evaluateJavaScript(source) { [weak self] result, _ in
             guard let self, let resumed = result as? Int, resumed > 0 else { return }
+            #if canImport(AVFAudio) && !os(macOS)
             AVAudioSession.sharedInstance().activate { _, _ in }
+            #endif
             self.webView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
         }
     }
@@ -292,6 +307,7 @@ final class WebModel: NSObject {
     /// scrolling counts: when the bar hides the page gets taller and its offset can shift,
     /// and reacting to that would make the bar flicker.
     private func scrolled(to y: CGFloat) {
+        #if canImport(UIKit)
         let scrollView = webView.scrollView
         let delta = y - lastScrollY
         lastScrollY = y
@@ -313,6 +329,7 @@ final class WebModel: NSObject {
             return
         }
         if immersive != isImmersive { isImmersive = immersive }
+        #endif
     }
 
     fileprivate func handleMessage(_ body: Any) {
@@ -327,7 +344,9 @@ final class WebModel: NSObject {
     }
 
     private func fail(_ error: Error) {
+        #if canImport(UIKit)
         refreshControl?.endRefreshing()
+        #endif
         let code = (error as NSError).code
         if code == NSURLErrorCancelled { return }
         // 102: "frame load interrupted" is what WebKit reports when we cancel a load ourselves.
@@ -348,7 +367,11 @@ extension WebModel: WKNavigationDelegate {
             webView.load(URLRequest(url: destination))
             return .cancel
         case .external(let outside):
+            #if canImport(UIKit)
             await UIApplication.shared.open(outside)
+            #elseif canImport(AppKit)
+            NSWorkspace.shared.open(outside)
+            #endif
             return .cancel
         case .cancel:
             return .cancel
@@ -361,7 +384,9 @@ extension WebModel: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         state = .loaded
+        #if canImport(UIKit)
         refreshControl?.endRefreshing()
+        #endif
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -385,7 +410,12 @@ extension WebModel: WKUIDelegate {
             switch navGuard.decide(url: url, isMainFrame: true) {
             case .allow: webView.load(URLRequest(url: url))
             case .redirect(let destination): webView.load(URLRequest(url: destination))
-            case .external(let outside): UIApplication.shared.open(outside)
+            case .external(let outside):
+                #if canImport(UIKit)
+                UIApplication.shared.open(outside)
+                #elseif canImport(AppKit)
+                NSWorkspace.shared.open(outside)
+                #endif
             case .cancel: break
             }
         }

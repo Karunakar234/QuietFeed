@@ -42,7 +42,7 @@ private struct WelcomeScreen: View {
                     Spacer(minLength: Space.s16)
 
                     VStack(alignment: .leading, spacing: Space.s20) {
-                        Image(.brandMark)
+                        Image("BrandMark")
                             .resizable()
                             .frame(width: 72, height: 72)
                             .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))

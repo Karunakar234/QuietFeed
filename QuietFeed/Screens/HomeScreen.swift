@@ -60,7 +60,11 @@ struct HomeScreen: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background { AuroraBackground() }
+            #if os(macOS)
+            .toolbar(.hidden, for: .windowToolbar)
+            #else
             .toolbar(.hidden, for: .navigationBar)
+            #endif
         }
     }
 
@@ -68,7 +72,7 @@ struct HomeScreen: View {
 
     private var header: some View {
         HStack(spacing: Space.s12) {
-            Image(.brandMark)
+            Image("BrandMark")
                 .resizable()
                 .frame(width: 52, height: 52)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
@@ -98,7 +102,9 @@ struct HomeScreen: View {
                         .foregroundStyle(.white.opacity(0.7))
                         .accessibilityHidden(true)
                     TextField("Search platforms and picks", text: $search)
+                        #if !os(macOS)
                         .textInputAutocapitalization(.never)
+                        #endif
                         .autocorrectionDisabled()
                         .submitLabel(.search)
                         .foregroundStyle(.white)

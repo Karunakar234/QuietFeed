@@ -8,8 +8,10 @@ struct StillfeedApp: App {
     @State private var insights = WeeklyInsightsStore()
 
     init() {
+        #if canImport(AVFAudio) && !os(macOS)
         // The playback category lets active web media continue when the app is backgrounded.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        #endif
     }
 
     var body: some Scene {
