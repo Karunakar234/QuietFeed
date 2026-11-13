@@ -76,9 +76,22 @@ struct GlassScreen<Content: View>: View {
             #if os(macOS)
             .toolbar(.hidden, for: .windowToolbar)
             #else
-            .toolbar(.hidden, for: .navigationBar)
+            .quietFeedNavigationChrome()
             #endif
         }
+    }
+}
+
+extension View {
+    /// Keep the native Mac title bar and its traffic-light window controls. On compact Apple
+    /// platforms the in-content header remains the only navigation chrome.
+    @ViewBuilder
+    func quietFeedNavigationChrome() -> some View {
+        #if os(macOS)
+        self
+        #else
+        toolbar(.hidden, for: .navigationBar)
+        #endif
     }
 }
 
@@ -168,6 +181,15 @@ struct PlatformArt {
         case "youtube_music":
             return PlatformArt(highlights: "Music\u{00A0}• Playlists\u{00A0}• Radio", iconColor: Neon.teal,
                                artSymbol: "headphones", artColors: [Neon.violet, Neon.magenta])
+        case "netflix":
+            return PlatformArt(highlights: "Movies\u{00A0}• Series\u{00A0}• Originals", iconColor: Neon.red,
+                               artSymbol: "film.stack.fill", artColors: [Neon.red, Neon.navy])
+        case "amazon_prime":
+            return PlatformArt(highlights: "Movies\u{00A0}• Series\u{00A0}• Live", iconColor: Neon.blue,
+                               artSymbol: "play.tv.fill", artColors: [Neon.blue, Neon.teal])
+        case "spotify":
+            return PlatformArt(highlights: "Music\u{00A0}• Podcasts\u{00A0}• Playlists", iconColor: Neon.teal,
+                               artSymbol: "waveform", artColors: [Neon.teal, Neon.navy])
         default:
             return PlatformArt(highlights: "", iconColor: Neon.teal,
                                artSymbol: "sparkles", artColors: [Neon.violet, Neon.blue])

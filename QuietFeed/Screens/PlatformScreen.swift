@@ -58,9 +58,10 @@ struct PlatformScreen: View {
     var body: some View {
         GeometryReader { geo in
             let minimized = session.isMinimized
+            let videoFullscreen = model?.isVideoFullscreen ?? false
             // Hide Header controls QuietFeed's chrome immediately. The site's own bars still
             // follow their existing scroll behavior from FilterEngine.js.
-            let barHidden = !minimized && hidesHeader
+            let barHidden = !minimized && (hidesHeader || videoFullscreen)
             let fullBleed = barHidden || isBrowsingFullScreen
             VStack(spacing: 0) {
                 if !minimized && !barHidden {
@@ -90,7 +91,7 @@ struct PlatformScreen: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .topLeading) {
-                    if barHidden {
+                    if barHidden && !videoFullscreen {
                         FloatingCloseButton(
                             platformName: platform.name,
                             onClose: { close() }
@@ -128,8 +129,14 @@ struct PlatformScreen: View {
             if !session.isMinimized { AuroraBackground() }
         }
         .task { start() }
+        .onDisappear {
+            model?.shutdown()
+        }
         .onChange(of: toggles) { _, new in
             model?.updateRules(ruleStore.enabledRules(for: platform.id, toggles: new))
+        }
+        .onChange(of: model?.isVideoFullscreen ?? false) { _, active in
+            session.setVideoFullscreen(active)
         }
         .onChange(of: scenePhase) { previous, phase in
             // Leaving goes active → inactive → background. Note what's playing while still
@@ -148,7 +155,11 @@ struct PlatformScreen: View {
 
     private func minimize() { withAnimation(Motion.spring) { session.minimize() } }
     private func expand() { withAnimation(Motion.spring) { session.expand() } }
-    private func close() { withAnimation(Motion.spring) { session.close() } }
+    private func close() {
+        model?.shutdown()
+        session.setVideoFullscreen(false)
+        withAnimation(Motion.spring) { session.close() }
+    }
 
     /// Pulling the top bar down shrinks the page, the way a video app's player does.
     /// It's on the bar only, so it never competes with scrolling the page.

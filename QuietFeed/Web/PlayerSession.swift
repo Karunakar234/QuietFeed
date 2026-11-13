@@ -10,6 +10,7 @@ final class PlayerSession {
     /// The page to open instead of the platform's home, such as a recommended search.
     private(set) var startURL: URL?
     private(set) var isMinimized = false
+    private(set) var isVideoFullscreen = false
 
     /// Changes whenever a different page is opened, so the screen builds a fresh web view for it.
     var openID: String { "\(platform?.id ?? "")|\(startURL?.absoluteString ?? "")" }
@@ -35,10 +36,15 @@ final class PlayerSession {
         isMinimized = false
     }
 
+    func setVideoFullscreen(_ active: Bool) {
+        isVideoFullscreen = active
+    }
+
     /// Closes the platform. Its web view is released, so playback stops.
     func close() {
         platform = nil
         startURL = nil
         isMinimized = false
+        isVideoFullscreen = false
     }
 }

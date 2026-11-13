@@ -16,6 +16,7 @@ final class WebModel: NSObject {
     private(set) var state: WebState = .loading(progress: 0)
     private(set) var isSingleItem = false
     private(set) var canGoBack = false
+    private(set) var isVideoFullscreen = false
     /// True while the person is scrolling down through the page: the screen hides its own bar
     /// and margins so the site gets the whole screen, leaving just a Close button.
     private(set) var isImmersive = false
@@ -57,17 +58,37 @@ final class WebModel: NSObject {
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = WKWebsiteDataStore(forIdentifier: dataStoreID)
+        // WKWebView disables the HTML element Fullscreen API by default. YouTube and
+        // YouTube Music check this preference before enabling their full-screen control.
+        // iPhone/iPad then use WebKit's native controller; Mac is customized below.
+        if Self.videoPlatformIDs.contains(platform.id) {
+            config.preferences.isElementFullscreenEnabled = true
+        }
         #if !os(macOS)
         config.allowsInlineMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
         #endif
         config.allowsAirPlayForMediaPlayback = true
-        // Present as ordinary mobile Safari so sign-in pages behave as they do there.
-        config.applicationNameForUserAgent = "Version/17.0 Mobile/15E148 Safari/604.1"
+        // Add the Safari identity only on iPhone and iPad. Appending a mobile Safari token to
+        // WebKit's desktop Mac user agent creates a mixed, unsupported identity that YouTube and
+        // YouTube Music can reject before rendering.
+        if !Self.isRunningOnMac {
+            config.applicationNameForUserAgent = "Version/17.0 Mobile/15E148 Safari/604.1"
+        }
         config.userContentController.add(WeakMessageHandler(target: self), name: "stillfeed")
         installScripts(rules, into: config.userContentController)
 
         let view = WKWebView(frame: .zero, configuration: config)
+        if Self.videoPlatformIDs.contains(platform.id) {
+            #if canImport(UIKit)
+            view.underPageBackgroundColor = .black
+            #elseif canImport(AppKit)
+            view.underPageBackgroundColor = .black
+            #endif
+        }
+        if Self.isRunningOnMac {
+            view.customUserAgent = Self.macSafariUserAgent
+        }
         view.navigationDelegate = self
         view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true
@@ -121,6 +142,25 @@ final class WebModel: NSObject {
         }
     }
 
+    private static var isRunningOnMac: Bool {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        true
+        #elseif canImport(UIKit)
+        ProcessInfo.processInfo.isiOSAppOnMac
+        #else
+        false
+        #endif
+    }
+
+    /// A coherent desktop Safari identity for native Mac, Catalyst, and iPad apps running on Mac.
+    private static let macSafariUserAgent =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+
+    private static let videoPlatformIDs: Set<String> = [
+        "youtube", "youtube_music", "netflix", "amazon_prime"
+    ]
+
     func loadHome() {
         load(platform.baseUrl)
     }
@@ -134,6 +174,22 @@ final class WebModel: NSObject {
         state = .loading(progress: 0)
         isImmersive = false
         if webView.url == nil { loadHome() } else { webView.reload() }
+    }
+
+    /// Immediately silences the page before its SwiftUI container disappears. WebKit processes
+    /// can outlive their view briefly, so relying on deallocation alone lets audio continue.
+    func shutdown() {
+        webView.evaluateJavaScript("""
+        document.querySelectorAll('video, audio').forEach(function (media) {
+          media.pause();
+          media.removeAttribute('autoplay');
+        });
+        """)
+        webView.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "stillfeed")
     }
 
     func goBack() {
@@ -202,12 +258,24 @@ final class WebModel: NSObject {
 
     private func installScripts(_ rules: [FilterRule], into controller: WKUserContentController) {
         let source = Self.engineSource + "\nwindow.__stillfeed && window.__stillfeed.boot(\(Self.json(rules)));"
-        let mainFrameOnly = platform.id != "youtube" && platform.id != "youtube_music"
+        // Streaming players commonly live in child frames. Install the engine in every frame
+        // for video services so playback-ad controls are visible to the skipper.
+        let mainFrameOnly = !Self.videoPlatformIDs.contains(platform.id)
         controller.addUserScript(WKUserScript(
             source: source,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: mainFrameOnly
         ))
+        // iPhone and iPad must keep WebKit's native video full-screen controller. The
+        // in-window override exists only for Mac, where the app intentionally keeps video
+        // inside its own window instead of opening a separate WebKit presentation.
+        if Self.isRunningOnMac && Self.videoPlatformIDs.contains(platform.id) {
+            controller.addUserScript(WKUserScript(
+                source: Self.inWindowFullscreenSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
         if platform.id == "youtube" || platform.id == "youtube_music" {
             controller.addUserScript(WKUserScript(
                 source: Self.keepVisibleSource,
@@ -286,6 +354,94 @@ final class WebModel: NSObject {
     })();
     """
 
+    /// WebKit's native element full screen detaches the web view into a separate macOS
+    /// presentation. Keep YouTube's player inside QuietFeed's existing window instead.
+    private static let inWindowFullscreenSource = """
+    (function () {
+      var activeElement = null;
+      var savedStyle = null;
+
+      function ensureStyle() {
+        if (document.getElementById('quietfeed-fullscreen-style')) return;
+        var fullscreenStyle = document.createElement('style');
+        fullscreenStyle.id = 'quietfeed-fullscreen-style';
+        fullscreenStyle.textContent = `
+          html.quietfeed-fullscreen, html.quietfeed-fullscreen body {
+            background: #000 !important;
+            overflow: hidden !important;
+          }
+          .quietfeed-in-window-fullscreen,
+          .quietfeed-in-window-fullscreen video {
+            background: #000 !important;
+          }
+          .quietfeed-in-window-fullscreen video {
+            object-fit: contain !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(fullscreenStyle);
+      }
+
+      function notify() {
+        document.dispatchEvent(new Event('fullscreenchange'));
+        document.dispatchEvent(new Event('webkitfullscreenchange'));
+        try {
+          window.webkit.messageHandlers.stillfeed.postMessage({ type: 'videoFullscreen', active: !!activeElement });
+        } catch (error) { /* The native bridge may not be ready during teardown. */ }
+      }
+
+      function enter(element) {
+        if (!element || activeElement === element) return Promise.resolve();
+        if (activeElement) exit();
+        ensureStyle();
+        activeElement = element;
+        savedStyle = element.getAttribute('style');
+        document.documentElement.classList.add('quietfeed-fullscreen');
+        element.classList.add('quietfeed-in-window-fullscreen');
+        Object.assign(element.style, {
+          position: 'fixed', inset: '0', width: '100vw', height: '100vh',
+          maxWidth: 'none', maxHeight: 'none', margin: '0', zIndex: '2147483647',
+          background: '#000', boxShadow: '0 0 0 100vmax #000'
+        });
+        document.documentElement.style.background = '#000';
+        document.body.style.background = '#000';
+        document.body.style.overflow = 'hidden';
+        notify();
+        return Promise.resolve();
+      }
+
+      function exit() {
+        if (!activeElement) return Promise.resolve();
+        activeElement.classList.remove('quietfeed-in-window-fullscreen');
+        if (savedStyle === null) activeElement.removeAttribute('style');
+        else activeElement.setAttribute('style', savedStyle);
+        activeElement = null;
+        savedStyle = null;
+        document.documentElement.classList.remove('quietfeed-fullscreen');
+        document.body.style.overflow = '';
+        notify();
+        return Promise.resolve();
+      }
+
+      try {
+        Object.defineProperty(Document.prototype, 'fullscreenEnabled', { configurable: true, get: function () { return true; } });
+        Object.defineProperty(Document.prototype, 'webkitFullscreenEnabled', { configurable: true, get: function () { return true; } });
+        Object.defineProperty(Document.prototype, 'fullscreenElement', { configurable: true, get: function () { return activeElement; } });
+        Object.defineProperty(Document.prototype, 'webkitFullscreenElement', { configurable: true, get: function () { return activeElement; } });
+        Object.defineProperty(Element.prototype, 'requestFullscreen', { configurable: true, value: function () { return enter(this); } });
+        Object.defineProperty(Element.prototype, 'webkitRequestFullscreen', { configurable: true, value: function () { return enter(this); } });
+        Object.defineProperty(Document.prototype, 'exitFullscreen', { configurable: true, value: exit });
+        Object.defineProperty(Document.prototype, 'webkitExitFullscreen', { configurable: true, value: exit });
+      } catch (error) { /* Keep WebKit's implementation if a property cannot be replaced. */ }
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && activeElement) {
+          event.preventDefault();
+          exit();
+        }
+      }, true);
+    })();
+    """
+
     private static func json(_ rules: [FilterRule]) -> String {
         guard let data = try? JSONEncoder.rules.encode(rules), let text = String(data: data, encoding: .utf8) else { return "[]" }
         return text
@@ -338,6 +494,8 @@ final class WebModel: NSObject {
         case "hidden":
             guard let count = message["count"] as? NSNumber else { return }
             insights.recordHidden(count.intValue)
+        case "videoFullscreen":
+            isVideoFullscreen = (message["active"] as? Bool) ?? false
         default:
             return
         }

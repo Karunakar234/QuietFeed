@@ -63,7 +63,7 @@ struct HomeScreen: View {
             #if os(macOS)
             .toolbar(.hidden, for: .windowToolbar)
             #else
-            .toolbar(.hidden, for: .navigationBar)
+            .quietFeedNavigationChrome()
             #endif
         }
     }
