@@ -179,8 +179,11 @@
         if (n.hasAttribute(HIDDEN)) continue;
         var text = (n.textContent || '').slice(0, 400);
         if (!firstMatch(r.text, text)) continue;
+        // Changing a switch unhides and rescans everything; count each post only the first time.
+        var firstTime = !n.hasAttribute(COUNTED);
+        n.setAttribute(COUNTED, '');
         if (r.action === 'remove') n.remove(); else n.setAttribute(HIDDEN, r.key);
-        hidden++;
+        if (firstTime) hidden++;
       }
     });
     if (hidden) post({ type: 'hidden', count: hidden });
@@ -275,7 +278,12 @@
       var testID = candidate.getAttribute('data-testid') || '';
       var label = (candidate.getAttribute('aria-label') || candidate.textContent || '').trim();
       var hasAdTestID = /(^|[-_])(ad|advertisement)([-_]|$)/i.test(testID);
-      var hasAdLabel = /^(ad|advertisement|sponsored)(\b|\s|$)/i.test(label);
+      // A track title is free text ("Ad Astra", "Sponsored Content"), so it only counts
+      // when the whole title is the ad label Spotify shows during an ad.
+      var isTrackTitle = testID === 'context-item-info-title';
+      var hasAdLabel = isTrackTitle
+        ? /^(ad|advertisement|sponsored)$/i.test(label)
+        : /^(ad|advertisement|sponsored)(\b|\s|$)/i.test(label);
       if ((hasAdTestID || hasAdLabel) && isVisible(candidate)) return candidate;
     }
     return null;
@@ -291,12 +299,16 @@
     state.adMedia = null;
   }
   function skipPlaybackAd() {
-    var player = queryDeep(
+    // Runs every 200ms. Walking every element (for shadow roots and text labels) is only
+    // needed on Prime Video; on other sites a plain lookup finds the player and its ad UI.
+    var isPrimeVideo = /(^|\.)(primevideo\.com|amazon\.[a-z.]+)$/.test(location.hostname);
+    var find = isPrimeVideo ? queryDeep : function (selector, root) { return (root || document).querySelector(selector); };
+    var player = find(
       '#movie_player, .html5-video-player, #dv-web-player, ' +
       '[class*="atvwebplayersdk-player"], [class~="ad-showing"], [class~="ad-interrupting"]'
     );
     var scope = player || document;
-    var adControl = queryDeep(
+    var adControl = find(
       '.ytp-ad-player-overlay, .ytp-ad-text, .ytp-ad-preview-text, ' +
       '.ytp-ad-simple-ad-badge, .ytp-ad-skip-button-container, ' +
       '[class*="adtimeindicator"], [class*="ad-time-indicator"], ' +
@@ -307,7 +319,7 @@
     var classes = player && player.classList;
     var isAd = !!(classes && (classes.contains('ad-showing') ||
       classes.contains('ad-interrupting'))) || isVisible(adControl);
-    if (!isAd) isAd = !!findPrimeAdLabel(scope);
+    if (!isAd && isPrimeVideo) isAd = !!findPrimeAdLabel(scope);
     if (!isAd && /(^|\.)spotify\.com$/.test(location.hostname)) isAd = !!findSpotifyAdLabel(scope);
 
     if (!isAd) { restoreMedia(); return; }
@@ -324,7 +336,6 @@
       findVisibleControlByText(/^(skip|skip ad|skip ads|skip advertisement|skip advertisements)(\s+now)?$/i, scope);
     if (skip) skip.click();
 
-    var isPrimeVideo = /(^|\.)(primevideo\.com|amazon\.[a-z.]+)$/.test(location.hostname);
     if (isPrimeVideo) {
       // Prime owns the ad-to-content handoff. Muting, play(), seeking, or changing the rate on
       // its media element can freeze the countdown in WKWebView, so only press its real skip UI.
@@ -332,7 +343,7 @@
       return;
     }
 
-    var media = queryDeep('video, audio', scope) || queryDeep('video, audio');
+    var media = find('video, audio', scope) || find('video, audio');
     if (!media) return;
     if (!state.adMedia || state.adMedia.media !== media) {
       restoreMedia();
