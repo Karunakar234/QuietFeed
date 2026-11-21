@@ -90,12 +90,13 @@ struct PlatformScreen: View {
                     if minimized { miniControls }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topLeading) {
+                .overlay(alignment: platform.id == "youtube_music" ? .top : .topLeading) {
                     if barHidden && !videoFullscreen {
                         FloatingCloseButton(
                             platformName: platform.name,
                             onClose: { close() }
                         )
+                        .padding(.leading, platform.id == "youtube_music" ? 0 : Space.s8)
                     }
                 }
                 // Full screen, the page sits in a rounded glass-edged frame over the neon backdrop;
@@ -292,7 +293,6 @@ private struct FloatingCloseButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.leading, Space.s8)
         .padding(.top, Space.s8)
         .accessibilityLabel("Close \(platformName)")
         .transition(.opacity.combined(with: .scale(scale: 0.8)))
