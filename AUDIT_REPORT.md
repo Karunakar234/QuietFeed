@@ -66,6 +66,32 @@ None intended. SwiftData models, the `rules.json` schema, the JS↔Swift message
 8. **Tests and CI:** add a Unit Testing Bundle target in Xcode. `NavigationGuard`, `RuleStore.enabledRules` and `WeeklyInsightsStore` are pure enough to test directly. Add a GitHub Action that runs `Tests/js`.
 9. Features worth proposing (not built): per-platform daily time limits on Stats; saved recommended searches; a "report a slip-through" flow (the `filterProblem` state already exists in `WebStateOverlay`).
 
+## Pass 2 — 2026-11-21 (built and tested in Xcode)
+
+The first pass ran with no Xcode, so this pass compiled the app, ran it on a real iPhone, and added Swift tests.
+
+**Baseline:** the iPhone and Mac builds both succeeded with 0 errors and 0 warnings. JS tests passed 24/24. There was no Swift test target.
+
+| # | Severity | Where | Root cause → fix | Verified |
+|---|---|---|---|---|
+| P1 | **Critical** | `rules.json` (YouTube Music) | On a real iPhone, taps on songs did nothing while scrolling still worked. A debug tap logger showed every tap landing on `<html>`, with `ytmusic-app-layout` and the player bar marked `inert`. The cause: YouTube Music opened its "Get the app / No thanks" pop-up, and **Remove ads** hid the promo inside it (`ytmusic-mealbar-promo-renderer`) while **Stay in QuietFeed** hid `tp-yt-paper-dialog` / `[role=dialog]`. The pop-up was invisible but still modal, so the page stayed inert. Fix: these pop-ups are no longer hidden with CSS. Their own dismiss button ("No thanks", "Not now", …) is pressed instead. | Device log (cause); JS tests ×3; Swift rules test; re-test on device pending |
+| P2 | High | `FilterEngine.js` `scan` (click action) | Each dismiss button was pressed only once, ever, so a pop-up the site reused stayed open the second time. It's now pressed whenever it's visible, at most once a second. Invisible buttons are skipped. | JS tests |
+| P3 | High | `WebModel.swift` (YouTube Music only) | Safety net: if the layout is `inert` while no pop-up is visible, `inert` is lifted (checked on DOM changes and on every touch). | Build; device re-test pending |
+| P4 | High (layout) | `HomeCards.swift` `AuroraBackground` | The glow ellipses (up to 540 pt) were ZStack children, so the backdrop reported a 540 pt width and pushed content past the screen edges wherever it was used as a layout child. The glows are now an overlay on the gradient. | Simulator: onboarding frames sit inside the 20 pt margins on a 402 pt screen |
+| P5 | Medium (security, was H1) | `WebModel` navigation delegate | A page could send people out of the app (to the App Store, say) through a script redirect, with no tap. Leaving the app now needs a link tap within the last 10 s, which keeps link shims like `l.instagram.com` working. `window.open` already requires a user gesture. | Build; manual check recommended |
+| P6 | Low (was H4) | `rules.json` Prime Video | Sign-in on amazon.co.uk/.de/.in/… left the app. The regional Amazon domains are now allowed. | Swift tests |
+| P7 | Testability | `WeeklyInsightsStore.init` | The file location was hard-coded, so tests would have touched real data. Optional `directory:` and `now:` parameters were added; the app's behaviour is unchanged. | Swift tests |
+| P8 | Tests | `QuietFeedTests` target (Swift Testing), hosted by the app | 24 tests: NavigationGuard (allow, external, cancelled schemes, redirects, lookalike hosts, regional Amazon), RuleStore (defaults, one switch per key, no CSS-hidden YouTube Music modals), WeeklyInsightsStore (per-day counts, week rollover, persistence across restart, corrupt file, reset). Added to the `MyApp` scheme's Test action. | **24/24 pass** on the iPhone 17 simulator |
+
+**Test results:** Swift 24/24 · JS (`Tests/js`) 27/27 · iPhone, Mac and simulator builds succeed with 0 warnings.
+
+**Still open:**
+- DEBUG-only YouTube Music tap logger (`tapDiagnosticsSource` in `WebModel.swift`): remove it once the device re-test confirms P1.
+- H2 (engine runs in the page's JS world) and H3 (child frames keep old rules): unchanged. Both need per-platform device testing.
+- With **Hide header** on, the floating controls are Close only (by request), so the mini-player can't be reached from a full-screen page. Turning Hide header off brings the minimize button back.
+- YouTube Music on Mac: no failure was reproduced (Device Interaction doesn't support macOS, and screen capture isn't permitted). The console showed pages loading and media playing.
+- No UI tests yet. Next would be XCUITests for onboarding → Home → open/close a tile.
+
 ## I. Release assessment
 
 **Not release-ready until built.** The JS changes are tested. The Swift changes are small and use standard WebKit/SwiftUI APIs, but they have not been compiled. Before merging:

@@ -20,21 +20,24 @@ final class WeeklyInsightsStore {
     @ObservationIgnored private var pendingSave: Task<Void, Never>?
     private static let saveDelay: Duration = .seconds(2)
 
-    init(fileManager: FileManager = .default) {
+    /// - Parameters:
+    ///   - directory: Where the file lives. The app uses Application Support/QuietFeed;
+    ///     tests pass a temporary folder so they never touch real data.
+    ///   - now: The current time, so tests can start in a chosen week.
+    init(fileManager: FileManager = .default, directory: URL? = nil, now: Date = .now) {
         self.fileManager = fileManager
 
         var calendar = Calendar(identifier: .iso8601)
         calendar.timeZone = .current
         self.calendar = calendar
 
-        let applicationSupport = fileManager.urls(
+        let folder = directory ?? (fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first ?? fileManager.temporaryDirectory
-        let directory = applicationSupport.appendingPathComponent("QuietFeed", isDirectory: true)
-        self.fileURL = directory.appendingPathComponent("weekly-insights.json")
+        ).first ?? fileManager.temporaryDirectory).appendingPathComponent("QuietFeed", isDirectory: true)
+        self.fileURL = folder.appendingPathComponent("weekly-insights.json")
 
-        let currentWeekStart = Self.weekStart(for: .now, calendar: calendar)
+        let currentWeekStart = Self.weekStart(for: now, calendar: calendar)
         if let data = try? Data(contentsOf: fileURL),
            let saved = try? JSONDecoder().decode(WeeklyInsightSnapshot.self, from: data),
            calendar.isDate(saved.weekStart, inSameDayAs: currentWeekStart),

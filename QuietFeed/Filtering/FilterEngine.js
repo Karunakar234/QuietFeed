@@ -149,12 +149,17 @@
       if (!r.selectors.length) return;
       if (r.action === 'click') {
         // Presses a button whose own label matches, e.g. "Not now" on an "open the app" pop-up.
+        // Pressing lets the site close its pop-up itself; hiding a modal with CSS instead leaves
+        // the rest of the page blocked from taps. Sites reuse the same pop-up, so a button is
+        // pressed again whenever it's showing, at most once a second.
         var buttons = document.querySelectorAll(r.selectors.join(','));
+        var now = Date.now();
         for (var b = 0; b < buttons.length; b++) {
           var button = buttons[b];
-          if (button.hasAttribute(CLICKED)) continue;
+          if (!button.getClientRects().length) continue;
+          if (now - Number(button.getAttribute(CLICKED) || 0) < 1000) continue;
           if (!firstMatch(r.text, (button.textContent || '').trim())) continue;
-          button.setAttribute(CLICKED, '');
+          button.setAttribute(CLICKED, String(now));
           button.click();
         }
         return;

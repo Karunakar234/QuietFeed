@@ -18,15 +18,21 @@ enum Neon {
 /// The backdrop behind Home: deep navy with soft teal and violet light, like the icon.
 struct AuroraBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Neon.navy, Neon.deepViolet, Neon.navy], startPoint: .top, endPoint: .bottom)
-            glow(Neon.violet, opacity: 0.55, width: 520, height: 260, x: 140, y: -340)
-            glow(Neon.teal, opacity: 0.35, width: 420, height: 200, x: 200, y: -380)
-            glow(Neon.teal, opacity: 0.22, width: 480, height: 240, x: 190, y: 90)
-            glow(Neon.violet, opacity: 0.35, width: 540, height: 260, x: -170, y: 430)
-        }
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
+        // The glows are an overlay so their fixed sizes never widen the layout: the backdrop
+        // always takes exactly the space it's given, on any screen.
+        LinearGradient(colors: [Neon.navy, Neon.deepViolet, Neon.navy], startPoint: .top, endPoint: .bottom)
+            .overlay {
+                ZStack {
+                    glow(Neon.violet, opacity: 0.55, width: 520, height: 260, x: 140, y: -340)
+                    glow(Neon.teal, opacity: 0.35, width: 420, height: 200, x: 200, y: -380)
+                    glow(Neon.teal, opacity: 0.22, width: 480, height: 240, x: 190, y: 90)
+                    glow(Neon.violet, opacity: 0.35, width: 540, height: 260, x: -170, y: 430)
+                }
+            }
+            .clipped()
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private func glow(_ color: Color, opacity: Double, width: CGFloat, height: CGFloat, x: CGFloat, y: CGFloat) -> some View {

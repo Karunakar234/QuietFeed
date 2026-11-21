@@ -30,6 +30,9 @@ final class WebModel: NSObject {
     @ObservationIgnored private var lastScrollY: CGFloat = 0
     /// How far the current scroll has gone in one direction (positive = down the page).
     @ObservationIgnored private var scrollRun: CGFloat = 0
+    /// When the person last tapped a link in the page; leaving the app needs a recent tap.
+    @ObservationIgnored private var lastLinkTap: Date?
+    private static let externalLinkGrace: TimeInterval = 10
     /// Set by shutdown(). The first load waits for the ad rules, and the page may be closed
     /// before they're ready; this stops that late load from starting in a closed page.
     @ObservationIgnored private var isShutDown = false
@@ -295,8 +298,75 @@ final class WebModel: NSObject {
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             ))
+            controller.addUserScript(WKUserScript(
+                source: Self.releaseHiddenModalSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+            #if DEBUG
+            controller.addUserScript(WKUserScript(
+                source: Self.tapDiagnosticsSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+            #endif
         }
     }
+
+    #if DEBUG
+    /// Temporary: logs what each tap lands on, pop-ups that appear, and media events, to find
+    /// why taps on YouTube Music songs don't play on a real iPhone.
+    private static let tapDiagnosticsSource = """
+    (function () {
+      function log(msg) {
+        try { window.webkit.messageHandlers.stillfeed.postMessage({ type: 'debug', message: String(msg).slice(0, 600) }); } catch (e) {}
+      }
+      function describe(el) {
+        var parts = [];
+        for (var i = 0; el && i < 6; i++, el = el.parentElement) {
+          var cs = getComputedStyle(el);
+          parts.push(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
+            (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.') : '') +
+            (el.hasAttribute('data-stillfeed-hidden') ? '[QF-HIDDEN]' : '') +
+            (cs.position === 'fixed' ? '[fixed]' : '') + (cs.pointerEvents === 'none' ? '[pe:none]' : ''));
+        }
+        return parts.join(' < ');
+      }
+      ['touchstart', 'click'].forEach(function (type) {
+        document.addEventListener(type, function (e) {
+          var t = e.touches && e.touches[0];
+          var x = t ? t.clientX : e.clientX, y = t ? t.clientY : e.clientY;
+          log(type + ' @' + Math.round(x) + ',' + Math.round(y) + ' target=' + describe(e.target) +
+              ' | atPoint=' + describe(document.elementFromPoint(x, y)) + ' defaultPrevented=' + e.defaultPrevented +
+              ' | modal: dialog[open]=' + document.querySelectorAll('dialog[open]').length +
+              ' inert=' + Array.prototype.map.call(document.querySelectorAll('[inert]'), function (n) { return n.tagName.toLowerCase(); }).join(',') +
+              ' qfHidden=' + Array.prototype.map.call(document.querySelectorAll('[data-stillfeed-hidden]'), function (n) { return n.tagName.toLowerCase(); }).join(',') +
+              ' bodyPE=' + (document.body ? getComputedStyle(document.body).pointerEvents : '?'));
+        }, true);
+      });
+      ['play', 'playing', 'pause', 'error', 'stalled'].forEach(function (type) {
+        document.addEventListener(type, function (e) {
+          var m = e.target;
+          log('media ' + type + ' src=' + String(m.currentSrc || '').slice(0, 60) + ' err=' + (m.error ? m.error.code + ' ' + m.error.message : ''));
+        }, true);
+      });
+      window.addEventListener('error', function (e) { log('js error ' + e.message); });
+      window.addEventListener('unhandledrejection', function (e) { log('rejection ' + (e.reason && e.reason.message || e.reason)); });
+      new MutationObserver(function (records) {
+        records.forEach(function (r) {
+          r.addedNodes.forEach(function (n) {
+            if (n.nodeType !== 1) return;
+            var tag = n.tagName.toLowerCase();
+            if (/dialog|popup|sheet|backdrop|overlay|upsell|promo|toast/.test(tag) || n.getAttribute('role') === 'dialog') {
+              log('added ' + tag + ' text="' + (n.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 160) + '"');
+            }
+          });
+        });
+      }).observe(document.documentElement, { childList: true, subtree: true });
+      log('diagnostics ready ' + navigator.userAgent);
+    })();
+    """
+    #endif
 
     /// The lock screen and Control Center build their buttons from the page's media session:
     /// seek handlers give ±10 second buttons, track handlers give next and previous song.
@@ -339,6 +409,35 @@ final class WebModel: NSObject {
       // Media "play" events don't bubble, so listen in the capture phase. Each new song reapplies it.
       document.addEventListener('play', useTrackControls, true);
       useTrackControls();
+    })();
+    """
+
+    /// While a pop-up is open, YouTube Music makes the rest of the page `inert`, which ignores
+    /// every tap (scrolling still works, as it's native). If a filter hides that pop-up, nothing
+    /// is left to close it and the page stays dead. This lifts `inert` once no pop-up is visible.
+    private static let releaseHiddenModalSource = """
+    (function () {
+      var timer = null;
+      function anyVisiblePopup() {
+        var popups = document.querySelectorAll('tp-yt-paper-dialog, tp-yt-iron-dropdown, ytmusic-popup-container [role="dialog"], dialog[open]');
+        for (var i = 0; i < popups.length; i++) {
+          var box = popups[i].getBoundingClientRect();
+          if (box.width > 0 && box.height > 0 && getComputedStyle(popups[i]).visibility !== 'hidden') return true;
+        }
+        return false;
+      }
+      function check() {
+        timer = null;
+        var blocked = document.querySelectorAll('ytmusic-app-layout[inert], ytmusic-player-bar[inert], ytmusic-app [inert]');
+        if (!blocked.length || anyVisiblePopup()) return;
+        for (var i = 0; i < blocked.length; i++) blocked[i].removeAttribute('inert');
+      }
+      // Wait a moment so a pop-up that's still opening counts as visible.
+      function schedule() { if (timer === null) timer = setTimeout(check, 400); }
+      new MutationObserver(schedule).observe(document.documentElement, {
+        subtree: true, childList: true, attributes: true, attributeFilter: ['inert', 'style', 'hidden']
+      });
+      document.addEventListener('touchstart', check, true);
     })();
     """
 
@@ -511,6 +610,10 @@ final class WebModel: NSObject {
             let isPlatformPage = platform.allowedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
             guard message.frameInfo.isMainFrame, isPlatformPage else { return }
             isVideoFullscreen = (body["active"] as? Bool) ?? false
+        #if DEBUG
+        case "debug":
+            print("[QF-TAP]", body["message"] as? String ?? "")
+        #endif
         default:
             return
         }
@@ -533,18 +636,26 @@ extension WebModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
-        switch navGuard.decide(url: url, isMainFrame: isMainFrame) {
+        let decision = navGuard.decide(url: url, isMainFrame: isMainFrame)
+        if isMainFrame, navigationAction.navigationType == .linkActivated, decision != .cancel {
+            lastLinkTap = .now
+        }
+        switch decision {
         case .allow:
             return .allow
         case .redirect(let destination):
             webView.load(URLRequest(url: destination))
             return .cancel
         case .external(let outside):
-            #if canImport(UIKit)
-            await UIApplication.shared.open(outside)
-            #elseif canImport(AppKit)
-            NSWorkspace.shared.open(outside)
-            #endif
+            // Only leave the app for a link the person tapped. A page's own script or a timed
+            // redirect could otherwise bounce them out (to the App Store, say) without asking.
+            // A few seconds of grace covers link shims like l.instagram.com, which redirect
+            // to the real site after the tap.
+            guard let tap = lastLinkTap, Date.now.timeIntervalSince(tap) < Self.externalLinkGrace else {
+                return .cancel
+            }
+            lastLinkTap = nil
+            openExternally(outside)
             return .cancel
         case .cancel:
             return .cancel
@@ -582,6 +693,17 @@ extension WebModel: WKNavigationDelegate {
     }
 }
 
+extension WebModel {
+    /// Hands a page outside the platform to Safari or the app that owns it.
+    private func openExternally(_ url: URL) {
+        #if canImport(UIKit)
+        UIApplication.shared.open(url)
+        #elseif canImport(AppKit)
+        NSWorkspace.shared.open(url)
+        #endif
+    }
+}
+
 extension WebModel: WKUIDelegate {
     /// Links that ask for a new window open in this one, through the same checks.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
@@ -590,12 +712,8 @@ extension WebModel: WKUIDelegate {
             switch navGuard.decide(url: url, isMainFrame: true) {
             case .allow: webView.load(URLRequest(url: url))
             case .redirect(let destination): webView.load(URLRequest(url: destination))
-            case .external(let outside):
-                #if canImport(UIKit)
-                UIApplication.shared.open(outside)
-                #elseif canImport(AppKit)
-                NSWorkspace.shared.open(outside)
-                #endif
+            // WebKit only asks for a new window after a tap (pop-ups need a user gesture).
+            case .external(let outside): openExternally(outside)
             case .cancel: break
             }
         }

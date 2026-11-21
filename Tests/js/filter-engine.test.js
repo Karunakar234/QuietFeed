@@ -218,3 +218,58 @@ test('Prime Video: no ad, no button pressed', () => {
   assert.equal(pressed, 0);
   p.close();
 });
+
+// ---------- YouTube Music "open the app" pop-ups ----------
+// Hiding a YouTube Music pop-up with CSS leaves the page `inert` (every tap ignored), so the
+// pop-up has to be dismissed with its own button instead.
+
+test('YouTube Music: the promo pop-up is dismissed with its own button, not hidden', async () => {
+  const p = load({
+    url: 'https://music.youtube.com/',
+    html: '<tp-yt-paper-dialog><ytmusic-mealbar-promo-renderer>Get the app' +
+          '<button id="no">No thanks</button></ytmusic-mealbar-promo-renderer></tp-yt-paper-dialog>',
+    rules: defaultRules('youtube_music')
+  });
+  let pressed = 0;
+  p.document.getElementById('no').addEventListener('click', () => { pressed++; });
+  await tick();
+  assert.equal(pressed, 1);
+  const promo = p.document.querySelector('ytmusic-mealbar-promo-renderer');
+  assert.notEqual(p.window.getComputedStyle(promo).display, 'none');
+  assert.equal(p.document.querySelector('tp-yt-paper-dialog').hasAttribute('data-stillfeed-hidden'), false);
+  p.close();
+});
+
+test('YouTube Music: a reused pop-up is dismissed again when it comes back', async () => {
+  const p = load({
+    url: 'https://music.youtube.com/',
+    html: '<tp-yt-paper-dialog><button id="no">Not now</button></tp-yt-paper-dialog>',
+    rules: defaultRules('youtube_music')
+  });
+  let pressed = 0;
+  p.document.getElementById('no').addEventListener('click', () => { pressed++; });
+  await tick();
+  assert.equal(pressed, 1);
+  await tick(1050);
+  p.document.body.appendChild(p.document.createElement('div')); // the pop-up reopening mutates the page
+  await tick();
+  assert.equal(pressed, 2);
+  p.close();
+});
+
+test('YouTube Music: an invisible button is not pressed', async () => {
+  const p = load({
+    url: 'https://music.youtube.com/',
+    html: '<button id="no">No thanks</button>',
+    rules: defaultRules('youtube_music'),
+    beforeBoot: w => {
+      const real = w.Element.prototype.getClientRects;
+      w.Element.prototype.getClientRects = function () { return this.id === 'no' ? [] : real.call(this); };
+    }
+  });
+  let pressed = 0;
+  p.document.getElementById('no').addEventListener('click', () => { pressed++; });
+  await tick();
+  assert.equal(pressed, 0);
+  p.close();
+});
