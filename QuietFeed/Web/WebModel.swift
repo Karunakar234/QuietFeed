@@ -30,6 +30,9 @@ final class WebModel: NSObject {
     @ObservationIgnored private var lastScrollY: CGFloat = 0
     /// How far the current scroll has gone in one direction (positive = down the page).
     @ObservationIgnored private var scrollRun: CGFloat = 0
+    /// Set by shutdown(). The first load waits for the ad rules, and the page may be closed
+    /// before they're ready; this stops that late load from starting in a closed page.
+    @ObservationIgnored private var isShutDown = false
     #if canImport(UIKit)
     @ObservationIgnored private var refreshControl: UIRefreshControl?
     #endif
@@ -136,9 +139,10 @@ final class WebModel: NSObject {
         #endif
         observations = obs
         // Load only after the ad rules are attached, so the first page request is filtered too.
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             await AdBlocker.install(into: config.userContentController)
-            load(startURL ?? platform.baseUrl)
+            guard let self, !self.isShutDown else { return }
+            self.load(self.startURL ?? self.platform.baseUrl)
         }
     }
 
@@ -179,6 +183,8 @@ final class WebModel: NSObject {
     /// Immediately silences the page before its SwiftUI container disappears. WebKit processes
     /// can outlive their view briefly, so relying on deallocation alone lets audio continue.
     func shutdown() {
+        isShutDown = true
+        isVideoFullscreen = false
         webView.evaluateJavaScript("""
         document.querySelectorAll('video, audio').forEach(function (media) {
           media.pause();
@@ -488,14 +494,23 @@ final class WebModel: NSObject {
         #endif
     }
 
-    fileprivate func handleMessage(_ body: Any) {
-        guard let message = body as? [String: Any], let type = message["type"] as? String else { return }
+    /// Largest count one filter pass can report. Any frame on the page can post to the
+    /// message handler, so a page can't inflate the weekly totals past this.
+    private static let maxHiddenPerMessage = 500
+
+    fileprivate func handleMessage(_ message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         switch type {
         case "hidden":
-            guard let count = message["count"] as? NSNumber else { return }
-            insights.recordHidden(count.intValue)
+            guard let count = body["count"] as? NSNumber else { return }
+            insights.recordHidden(min(max(count.intValue, 0), Self.maxHiddenPerMessage))
         case "videoFullscreen":
-            isVideoFullscreen = (message["active"] as? Bool) ?? false
+            // Full screen hides QuietFeed's bar and Close button, so only the platform's own
+            // top-level page may turn it on, never an embedded (ad or third-party) frame.
+            let host = message.frameInfo.securityOrigin.host.lowercased()
+            let isPlatformPage = platform.allowedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+            guard message.frameInfo.isMainFrame, isPlatformPage else { return }
+            isVideoFullscreen = (body["active"] as? Bool) ?? false
         default:
             return
         }
@@ -536,6 +551,12 @@ extension WebModel: WKNavigationDelegate {
         }
     }
 
+    /// A new document replaces the page's scripts, including any in-window full screen, so
+    /// the app's bar and Close button must come back rather than stay hidden for good.
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        isVideoFullscreen = false
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         state = .loading(progress: webView.estimatedProgress)
     }
@@ -556,6 +577,7 @@ extension WebModel: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        isVideoFullscreen = false
         reload()
     }
 }
@@ -591,6 +613,6 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        target?.handleMessage(message.body)
+        target?.handleMessage(message)
     }
 }

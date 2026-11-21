@@ -28,7 +28,7 @@ struct OnboardingFlow: View {
         .padding(.vertical, Space.s16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { AuroraBackground() }
-        .animation(Motion.spring, value: step)
+        .animation(Motion.gentle, value: step)
     }
 }
 

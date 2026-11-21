@@ -202,6 +202,6 @@ struct HomeScreen: View {
     }
 
     private func open(_ platform: Platform, at url: URL? = nil) {
-        withAnimation(Motion.spring) { session.open(platform, at: url) }
+        withAnimation(Motion.gentle) { session.open(platform, at: url) }
     }
 }

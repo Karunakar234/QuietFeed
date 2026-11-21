@@ -7,6 +7,8 @@ import AppKit
 struct RootView: View {
     @Environment(RuleStore.self) private var ruleStore
     @Environment(\.modelContext) private var context
+    @Environment(WeeklyInsightsStore.self) private var insights
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var settings: [PlatformSetting]
     @AppStorage("didOnboard") private var didOnboard = false
     @State private var session = PlayerSession()
@@ -61,6 +63,10 @@ struct RootView: View {
         .task {
             await ruleStore.load()
             seedSettings()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Save this week's batched counts before the system may suspend the app.
+            if phase != .active { insights.flush() }
         }
     }
 
@@ -186,7 +192,7 @@ private struct MacFloatingTabBar: View {
             HStack(spacing: Space.s4) {
                 ForEach(items, id: \.0) { tab, symbol, title in
                     Button {
-                        withAnimation(Motion.spring) { selection = tab }
+                        withAnimation(Motion.gentle) { selection = tab }
                     } label: {
                         HStack(spacing: Space.s8) {
                             Image(systemName: symbol)
@@ -216,7 +222,7 @@ private struct MacFloatingTabBar: View {
         }
         .padding(Space.s4)
         .onHover { hovering in
-            withAnimation(Motion.spring) { isHovering = hovering }
+            withAnimation(Motion.gentle) { isHovering = hovering }
         }
         .shadow(color: .black.opacity(0.28), radius: 22, y: 10)
     }

@@ -108,7 +108,7 @@ struct PlatformScreen: View {
                 }
                 .padding([.horizontal, .bottom], minimized || fullBleed ? 0 : Space.s8)
             }
-            .animation(Motion.spring, value: fullBleed)
+            .animation(Motion.gentle, value: fullBleed)
             .frame(width: minimized ? MiniPlayer.size.width : geo.size.width,
                    height: minimized ? MiniPlayer.size.height : geo.size.height)
             .background(minimized ? Theme.color.bg : .clear)
@@ -154,12 +154,12 @@ struct PlatformScreen: View {
 
     // MARK: - Mini-player
 
-    private func minimize() { withAnimation(Motion.spring) { session.minimize() } }
-    private func expand() { withAnimation(Motion.spring) { session.expand() } }
+    private func minimize() { withAnimation(Motion.gentle) { session.minimize() } }
+    private func expand() { withAnimation(Motion.gentle) { session.expand() } }
     private func close() {
         model?.shutdown()
         session.setVideoFullscreen(false)
-        withAnimation(Motion.spring) { session.close() }
+        withAnimation(Motion.gentle) { session.close() }
     }
 
     /// Pulling the top bar down shrinks the page, the way a video app's player does.
@@ -227,7 +227,7 @@ struct PlatformScreen: View {
             .onChanged { miniDrag = $0.translation }
             .onEnded { value in
                 let landing = miniCenter(in: bounds, dragging: value.predictedEndTranslation)
-                withAnimation(Motion.spring) {
+                withAnimation(Motion.gentle) {
                     miniCorner = MiniCorner(isTop: landing.y < bounds.height / 2,
                                             isLeading: landing.x < bounds.width / 2)
                     miniDrag = .zero

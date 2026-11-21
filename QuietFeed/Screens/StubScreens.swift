@@ -165,7 +165,7 @@ struct SettingsScreen: View {
             Text("This will reset your count of filtered items for this week back to zero.")
         }
         .confirmationDialog(
-            "Delete everything QuietFeed has stored on this phone?",
+            "Delete everything QuietFeed has stored on this device?",
             isPresented: $confirmDelete,
             titleVisibility: .visible
         ) {
@@ -263,7 +263,7 @@ private struct SettingsDataCard: View {
                     .overlay(.white.opacity(0.12))
                     .padding(.vertical, Space.s4)
 
-                Text("Signs you out of every platform in QuietFeed, clears your weekly insights and resets every switch, as on first launch. Your Instagram and YouTube accounts themselves aren't touched.")
+                Text("Signs you out of every platform in QuietFeed, clears your weekly insights and resets every switch, as on first launch. Your accounts on those platforms themselves aren't touched.")
                     .font(TypeRole.footnote)
                     .foregroundStyle(.white.opacity(0.65))
 
@@ -277,7 +277,7 @@ private struct SettingsDataCard: View {
 private struct SettingsAboutCard: View {
     var body: some View {
         GlassSectionCard("About", symbol: "info.circle.fill") {
-            Text("QuietFeed is independent and not affiliated with Instagram, Meta, YouTube or Google.")
+            Text("QuietFeed is independent and not affiliated with Instagram, Meta, YouTube, Google, Netflix, Amazon or Spotify.")
                 .font(TypeRole.footnote)
                 .foregroundStyle(.white.opacity(0.7))
         }

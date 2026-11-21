@@ -15,6 +15,10 @@ final class WeeklyInsightsStore {
     private let fileURL: URL
     private let fileManager: FileManager
     private let calendar: Calendar
+    /// The filter engine reports every few dozen milliseconds while a page scrolls, so saves
+    /// are batched: at most one write every couple of seconds, plus flush() on backgrounding.
+    @ObservationIgnored private var pendingSave: Task<Void, Never>?
+    private static let saveDelay: Duration = .seconds(2)
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -78,11 +82,31 @@ final class WeeklyInsightsStore {
         guard snapshot.dailyHiddenCounts.indices.contains(day) else { return }
 
         snapshot.dailyHiddenCounts[day] += count
+        scheduleSave()
+    }
+
+    /// Writes any batched count now. Called when the app leaves the foreground.
+    func flush() {
+        guard pendingSave != nil else { return }
+        pendingSave?.cancel()
+        pendingSave = nil
         persist()
+    }
+
+    private func scheduleSave() {
+        guard pendingSave == nil else { return }
+        pendingSave = Task { [weak self] in
+            try? await Task.sleep(for: Self.saveDelay)
+            guard let self, !Task.isCancelled else { return }
+            self.pendingSave = nil
+            self.persist()
+        }
     }
 
     /// Deletes the saved file and starts this week over at zero ("Delete my data" in Settings).
     func reset() {
+        pendingSave?.cancel()
+        pendingSave = nil
         try? fileManager.removeItem(at: fileURL)
         snapshot = WeeklyInsightSnapshot(
             weekStart: Self.weekStart(for: .now, calendar: calendar),

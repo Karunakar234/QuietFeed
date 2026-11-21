@@ -299,7 +299,7 @@ struct WebTopBar: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityHint("Opens the real app for 10 minutes")
+                    .accessibilityHint("Explains how to post on this platform")
                 }
                 if let onMinimize {
                     glassIcon("pip.enter", label: "Shrink to mini player", action: onMinimize)
