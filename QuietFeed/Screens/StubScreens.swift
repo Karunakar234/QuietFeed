@@ -1,34 +1,68 @@
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 struct BlockingScreen: View {
+    @Environment(FocusSessionStore.self) private var focus
+    @State private var notificationMessage: String?
+
     var body: some View {
         GlassScreen(
             title: "Blocking",
-            subtitle: "Keep distracting apps out of reach without losing important notifications.",
+            subtitle: "Pause platform opening inside QuietFeed during a timed focus session.",
             symbol: "hand.raised.fill"
         ) {
-            GlassSectionCard {
-                VStack(spacing: Space.s16) {
-                    Image(systemName: "hand.raised.slash.fill")
-                        .font(.system(size: 44, weight: .semibold))
-                        .foregroundStyle(Neon.teal)
-                        .frame(width: 88, height: 88)
-                        .glassEffect(.regular, in: .circle)
-                        .accessibilityHidden(true)
+            VStack(spacing: Space.s16) {
+                FocusStatusCard()
+                GlassSectionCard("Session controls", symbol: "timer") {
+                    ToggleRow(
+                        title: "Block QuietFeed platforms",
+                        subtitle: "Stops platform cards from opening while a focus session is active.",
+                        isOn: Binding(
+                            get: { focus.blocksPlatforms },
+                            set: { focus.blocksPlatforms = $0 }
+                        )
+                    )
 
-                    Text("Blocking is off")
-                        .font(TypeRole.title3)
-                        .foregroundStyle(.white)
+                    HStack {
+                        Button("25 minutes") { Task { await focus.start(minutes: 25) } }
+                        Button("50 minutes") { Task { await focus.start(minutes: 50) } }
+                    }
+                    .buttonStyle(.app(.secondary, .md))
 
-                    Text("QuietFeed doesn't block your real apps, so their notifications keep working. Sending them here instead will be an option you turn on.")
-                        .font(TypeRole.body)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
+                    if focus.isActive {
+                        Button("End focus session", role: .destructive) { focus.stop() }
+                            .buttonStyle(.app(.danger, .md))
+                    }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Space.s16)
+
+                GlassSectionCard("Notifications", symbol: "bell.fill") {
+                    ToggleRow(
+                        title: "Completion alert",
+                        subtitle: "Ask iOS to notify you when a session finishes.",
+                        isOn: Binding(
+                            get: { focus.completionNotifications },
+                            set: { enabled in
+                                Task {
+                                    let accepted = await focus.setNotificationsEnabled(enabled)
+                                    if enabled && !accepted {
+                                        notificationMessage = "Notifications are disabled in system settings."
+                                    }
+                                }
+                            }
+                        )
+                    )
+                    if let notificationMessage {
+                        Text(notificationMessage)
+                            .font(TypeRole.footnote)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+
+                Text("This blocks only content opened inside QuietFeed. It does not block the providers' installed apps.")
+                    .font(TypeRole.footnote)
+                    .foregroundStyle(.white.opacity(0.65))
             }
         }
     }
@@ -36,11 +70,21 @@ struct BlockingScreen: View {
 
 struct StatsScreen: View {
     @Environment(WeeklyInsightsStore.self) private var insights
+    @Environment(UsageStore.self) private var usage
+    @Environment(RuleStore.self) private var ruleStore
+
+    private var weekStart: Date {
+        Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
+    }
+
+    private var csv: String {
+        usage.exportCSV { ruleStore.platform(id: $0)?.name ?? $0 }
+    }
 
     var body: some View {
         GlassScreen(
             title: "Stats",
-            subtitle: "A simple view of the distractions QuietFeed has removed.",
+            subtitle: "Activity measured while platforms are open inside QuietFeed.",
             symbol: "chart.bar.fill"
         ) {
             VStack(spacing: Space.s16) {
@@ -53,18 +97,63 @@ struct StatsScreen: View {
                         .foregroundStyle(.white.opacity(0.7))
                 }
 
-                GlassSectionCard("Screen Time", symbol: "hourglass") {
-                    Text("Time in feeds avoided")
-                        .font(TypeRole.body)
-                        .foregroundStyle(.white)
-                    Text("Screen Time access isn't connected yet.")
+                GlassSectionCard("QuietFeed usage", symbol: "hourglass") {
+                    Text(Duration.seconds(usage.duration(since: weekStart)), format: .time(pattern: .hourMinute))
+                        .font(TypeRole.stat)
+                        .foregroundStyle(Neon.teal)
+                    Text("time in opened platforms this week")
                         .font(TypeRole.footnote)
                         .foregroundStyle(.white.opacity(0.65))
+
+                    ForEach(ruleStore.platforms) { platform in
+                        let duration = usage.duration(platformID: platform.id, since: weekStart)
+                        if duration > 0 {
+                            HStack {
+                                Text(platform.name)
+                                Spacer()
+                                Text(Duration.seconds(duration), format: .time(pattern: .hourMinute))
+                            }
+                            .font(TypeRole.footnote)
+                            .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                }
+
+                GlassSectionCard("Export", symbol: "square.and.arrow.up") {
+                    ShareLink(item: csv, subject: Text("QuietFeed usage export")) {
+                        Label("Export usage as CSV", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.app(.secondary, .md))
                 }
             }
         }
         .task {
             insights.refresh()
+        }
+    }
+}
+
+private struct FocusStatusCard: View {
+    @Environment(FocusSessionStore.self) private var focus
+
+    var body: some View {
+        GlassSectionCard("Focus status", symbol: focus.isActive ? "leaf.fill" : "pause.circle") {
+            if focus.isActive {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(Duration.seconds(focus.remaining(at: context.date)), format: .time(pattern: .minuteSecond))
+                        .font(TypeRole.stat)
+                        .foregroundStyle(Neon.teal)
+                        .accessibilityLabel("Focus time remaining")
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+                Text("Session continues correctly while the app is backgrounded because it uses its saved end time.")
+                    .font(TypeRole.footnote)
+                    .foregroundStyle(.white.opacity(0.65))
+            } else {
+                Text("No focus session is active")
+                    .font(TypeRole.headline)
+                    .foregroundStyle(.white)
+            }
         }
     }
 }
@@ -126,12 +215,17 @@ struct SettingsScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlayerSession.self) private var session
     @Environment(WeeklyInsightsStore.self) private var insights
+    @Environment(UsageStore.self) private var usage
+    @Environment(FocusSessionStore.self) private var focus
+    @Environment(OfflineAudioLibrary.self) private var offlineAudio
     @Query(sort: \PlatformSetting.sortOrder) private var settings: [PlatformSetting]
     @Query private var accounts: [Account]
     @AppStorage("didOnboard") private var didOnboard = false
     @State private var confirmDelete = false
     @State private var confirmDeleteInsights = false
     @State private var isDeleting = false
+    @State private var showFilters = false
+    @State private var showOfflineAudio = false
 
     var body: some View {
         GlassScreen(
@@ -140,6 +234,12 @@ struct SettingsScreen: View {
             symbol: "gearshape.fill"
         ) {
             VStack(spacing: Space.s16) {
+                SettingsFiltersCard {
+                    showFilters = true
+                }
+                SettingsOfflineAudioCard {
+                    showOfflineAudio = true
+                }
                 SettingsPlatformsCard(settings: settings)
                 SettingsDataCard(
                     deleteInsightsAction: {
@@ -151,6 +251,12 @@ struct SettingsScreen: View {
                 )
                 SettingsAboutCard()
             }
+        }
+        .sheet(isPresented: $showFilters) {
+            FiltersSettingsSheet()
+        }
+        .sheet(isPresented: $showOfflineAudio) {
+            OfflineAudioScreen()
         }
         .confirmationDialog(
             "Delete weekly insight data?",
@@ -211,7 +317,161 @@ struct SettingsScreen: View {
         }
         try? context.save()
         insights.reset()
+        usage.reset()
+        focus.stop()
+        offlineAudio.reset()
         didOnboard = false
+    }
+}
+
+private struct SettingsOfflineAudioCard: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.s12) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Neon.teal)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Space.s4) {
+                    Text("Offline audio")
+                        .font(TypeRole.headline)
+                    Text("Import audio files you own and listen without a network connection.")
+                        .font(TypeRole.footnote)
+                        .foregroundStyle(.white.opacity(0.65))
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: "chevron.forward")
+                    .accessibilityHidden(true)
+            }
+            .padding(Space.s16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.lg))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens your offline audio library")
+    }
+}
+
+private struct OfflineAudioScreen: View {
+    @Environment(OfflineAudioLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
+    @State private var importsFile = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("QuietFeed imports audio files you choose. It cannot download protected music or video from streaming services.")
+                }
+
+                Section("Library") {
+                    if library.tracks.isEmpty {
+                        Text("No offline audio imported")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(library.tracks) { track in
+                        HStack {
+                            Button {
+                                library.togglePlayback(of: track)
+                            } label: {
+                                Label(
+                                    track.title,
+                                    systemImage: library.playingTrackID == track.id && library.isPlaying
+                                        ? "pause.circle.fill" : "play.circle.fill"
+                                )
+                            }
+                            Spacer()
+                            Button("Delete", role: .destructive) { library.remove(track) }
+                        }
+                    }
+                }
+
+                if let error = library.lastError {
+                    Section { Text(error).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Offline audio")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Import") { importsFile = true }
+                }
+            }
+            .fileImporter(isPresented: $importsFile, allowedContentTypes: [.audio]) { result in
+                if case .success(let url) = result {
+                    library.importAudio(from: url)
+                }
+            }
+        }
+    }
+}
+
+private struct SettingsFiltersCard: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.s12) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Neon.teal)
+                    .frame(width: 42, height: 42)
+                    .glassEffect(.regular, in: .circle)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: Space.s4) {
+                    Text("Filters")
+                        .font(TypeRole.headline)
+                        .foregroundStyle(.white)
+                    Text("Choose what appears on Home and inside each platform.")
+                        .font(TypeRole.footnote)
+                        .foregroundStyle(.white.opacity(0.65))
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: Space.s8)
+
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .accessibilityHidden(true)
+            }
+            .padding(Space.s16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.lg))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Filters")
+        .accessibilityHint("Opens filter settings")
+    }
+}
+
+private struct FiltersSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        FiltersScreen()
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .buttonStyle(.plain)
+                .padding(Space.s16)
+                .accessibilityLabel("Close Filters")
+            }
     }
 }
 

@@ -2,7 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { RULESET } = require('./harness');
 
-const ACTIONS = new Set(['hide', 'remove', 'redirect', 'block_navigation', 'disable_scroll', 'skip_ads', 'autohide_top', 'autohide_bottom', 'click']);
+const ACTIONS = new Set(['hide', 'remove', 'redirect', 'block_navigation', 'disable_scroll', 'autohide_top', 'autohide_bottom', 'click']);
+
+test('rules contain no ad-removal behavior', () => {
+  for (const rule of RULESET.rules) {
+    assert.notEqual(rule.action, 'skip_ads');
+    assert.notEqual(rule.key, 'hide_ads');
+    assert.notEqual(rule.key, 'hide_sponsored');
+  }
+});
 
 test('every rule belongs to a known platform and uses a known action', () => {
   const ids = new Set(RULESET.platforms.map(p => p.id));

@@ -126,45 +126,49 @@ private struct MacWindowControlBar: View {
 #endif
 
 enum AppTab: Hashable {
-    case home, filters, blocking, stats, settings
+    case home, blocking, stats, settings
 }
 
 struct MainTabs: View {
     @State private var selection: AppTab = .home
 
     var body: some View {
-        #if os(macOS)
-        ZStack(alignment: .bottom) {
-            MacTabContent(selection: selection, showFilters: { selection = .filters })
-            MacFloatingTabBar(selection: $selection)
-                .padding(.bottom, Space.s16)
-        }
-        #else
-        TabView(selection: $selection) {
-            Tab("Home", systemImage: "house", value: .home) {
-                HomeScreen(showFilters: { selection = .filters })
+        TabContent(selection: selection)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                AuroraTabBar(selection: $selection)
+                    .padding(.horizontal, horizontalDockPadding)
+                    .padding(.vertical, Space.s8)
+                    #if os(macOS)
+                    .padding(.bottom, Space.s8)
+                    #endif
+                    .frame(maxWidth: .infinity)
+                    .background {
+                        LinearGradient(
+                            colors: [.clear, Neon.navy.opacity(0.92)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea()
+                    }
             }
-            Tab("Filters", systemImage: "slider.horizontal.3", value: .filters) { FiltersScreen() }
-            Tab("Blocking", systemImage: "hand.raised", value: .blocking) { BlockingScreen() }
-            Tab("Stats", systemImage: "chart.bar", value: .stats) { StatsScreen() }
-            Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsScreen() }
-        }
-        .tint(Neon.teal)
+    }
+
+    private var horizontalDockPadding: CGFloat {
+        #if os(macOS)
+        Space.s24
+        #else
+        Space.s12
         #endif
     }
 }
 
-#if os(macOS)
-private struct MacTabContent: View {
+private struct TabContent: View {
     let selection: AppTab
-    let showFilters: () -> Void
 
     var body: some View {
         switch selection {
         case .home:
-            HomeScreen(showFilters: showFilters)
-        case .filters:
-            FiltersScreen()
+            HomeScreen()
         case .blocking:
             BlockingScreen()
         case .stats:
@@ -175,13 +179,11 @@ private struct MacTabContent: View {
     }
 }
 
-private struct MacFloatingTabBar: View {
+private struct AuroraTabBar: View {
     @Binding var selection: AppTab
-    @State private var isHovering = false
 
     private let items: [(AppTab, String, String)] = [
         (.home, "house.fill", "Home"),
-        (.filters, "slider.horizontal.3", "Filters"),
         (.blocking, "hand.raised.fill", "Blocking"),
         (.stats, "chart.bar.fill", "Stats"),
         (.settings, "gearshape.fill", "Settings")
@@ -191,40 +193,70 @@ private struct MacFloatingTabBar: View {
         GlassEffectContainer(spacing: Space.s4) {
             HStack(spacing: Space.s4) {
                 ForEach(items, id: \.0) { tab, symbol, title in
-                    Button {
-                        withAnimation(Motion.gentle) { selection = tab }
-                    } label: {
-                        HStack(spacing: Space.s8) {
-                            Image(systemName: symbol)
-                                .frame(width: 20)
-                            if isHovering || selection == tab {
-                                Text(title)
-                                    .font(TypeRole.footnote.weight(.semibold))
-                                    .transition(.opacity.combined(with: .move(edge: .leading)))
-                            }
+                    AuroraTabButton(
+                        symbol: symbol,
+                        title: title,
+                        isSelected: selection == tab
+                    ) {
+                        withAnimation(Motion.gentle) {
+                            selection = tab
                         }
-                        .foregroundStyle(selection == tab ? Neon.teal : .white.opacity(0.78))
-                        .padding(.horizontal, isHovering || selection == tab ? Space.s12 : Space.s8)
-                        .frame(minHeight: Layout.minTap)
-                        .contentShape(Capsule())
-                        .glassEffect(
-                            selection == tab
-                                ? .regular.tint(Neon.teal.opacity(0.18)).interactive()
-                                : .regular.interactive(),
-                            in: .capsule
-                        )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(title)
-                    .accessibilityAddTraits(selection == tab ? .isSelected : [])
                 }
             }
         }
         .padding(Space.s4)
-        .onHover { hovering in
-            withAnimation(Motion.gentle) { isHovering = hovering }
+        .background(.black.opacity(0.24), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(
+                    LinearGradient(
+                        colors: [Neon.teal.opacity(0.7), .white.opacity(0.14), Neon.violet.opacity(0.55)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 1
+                )
         }
-        .shadow(color: .black.opacity(0.28), radius: 22, y: 10)
+        .shadow(color: Neon.teal.opacity(0.18), radius: 18, y: 6)
+        .shadow(color: .black.opacity(0.38), radius: 24, y: 12)
+        .frame(maxWidth: 620)
     }
 }
-#endif
+
+private struct AuroraTabButton: View {
+    let symbol: String
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                    .frame(height: 20)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(isSelected ? Neon.teal : .white.opacity(0.78))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .padding(.horizontal, Space.s4)
+            .contentShape(Capsule())
+            .glassEffect(
+                isSelected
+                    ? .regular.tint(Neon.teal.opacity(0.28)).interactive()
+                    : .regular.interactive(),
+                in: .capsule
+            )
+            .shadow(color: isSelected ? Neon.teal.opacity(0.45) : .clear, radius: 8)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}

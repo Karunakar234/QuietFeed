@@ -1,7 +1,7 @@
 // Stillfeed filter engine. Bundled with the app and reviewed with each release.
 // It takes rules as DATA (selectors, URL patterns, text patterns, one action from a
 // fixed set) and never evaluates code that arrives from the server.
-// Actions: hide | remove | redirect | block_navigation | disable_scroll | skip_ads
+// Actions: hide | remove | redirect | block_navigation | disable_scroll
 //          | autohide_top | autohide_bottom | click
 (function () {
   'use strict';
@@ -14,69 +14,7 @@
   // Marks buttons a `click` rule has already pressed, so each is pressed once.
   var CLICKED = 'data-stillfeed-clicked';
   var SINGLE = 'stillfeed-single';
-  var state = { rules: [], locked: false, lastPath: null, timer: null, observer: null, adTimer: null, adSanitizerInstalled: false };
-
-  // Remove ad scheduling data before YouTube's player consumes its JSON response.
-  // The visual/player-state skipper below remains as a fallback when the response shape changes.
-  // Ad fields sit near the top of YouTube's player data (at most a couple of levels down, e.g.
-  // inside a page's playerResponse), so the walk stops after a few levels. Walking every object
-  // in every large response made each JSON.parse several times slower and the page stutter.
-  var AD_SEARCH_DEPTH = 5;
-
-  function stripPlayerAds(value, seen, depth) {
-    if (!value || typeof value !== 'object') return value;
-    depth = depth || 0;
-    if (depth > AD_SEARCH_DEPTH) return value;
-    seen = seen || new WeakSet();
-    if (seen.has(value)) return value;
-    seen.add(value);
-
-    var adKeys = [
-      'adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams',
-      'adBreakParams', 'adParams', 'adPlacementRenderer', 'linearAdSequenceRenderer'
-    ];
-    for (var i = 0; i < adKeys.length; i++) {
-      try { delete value[adKeys[i]]; } catch (e) {}
-    }
-
-    if (Array.isArray(value)) {
-      for (var j = 0; j < value.length; j++) stripPlayerAds(value[j], seen, depth + 1);
-    } else {
-      Object.keys(value).forEach(function (key) {
-        stripPlayerAds(value[key], seen, depth + 1);
-      });
-    }
-    return value;
-  }
-
-  function installPlayerResponseSanitizer() {
-    if (state.adSanitizerInstalled || !/(^|\.)youtube\.com$/.test(location.hostname)) return;
-    state.adSanitizerInstalled = true;
-
-    var originalParse = JSON.parse;
-    JSON.parse = function () {
-      return stripPlayerAds(originalParse.apply(this, arguments));
-    };
-
-    if (window.Response && Response.prototype && Response.prototype.json) {
-      var originalResponseJSON = Response.prototype.json;
-      Response.prototype.json = function () {
-        return originalResponseJSON.apply(this, arguments).then(function (value) {
-          return stripPlayerAds(value);
-        });
-      };
-    }
-
-    try {
-      var initialPlayerResponse;
-      Object.defineProperty(window, 'ytInitialPlayerResponse', {
-        configurable: true,
-        enumerable: true,
-        get: function () { return initialPlayerResponse; },
-        set: function (value) { initialPlayerResponse = stripPlayerAds(value); }
-      });
-    } catch (e) {}
-  }
+  var state = { rules: [], locked: false, lastPath: null, timer: null, observer: null };
 
   function post(msg) {
     try { window.webkit.messageHandlers.stillfeed.postMessage(msg); } catch (e) { /* not in the app */ }
@@ -201,187 +139,8 @@
     for (var i = 0; i < nodes.length; i++) nodes[i].removeAttribute(HIDDEN);
   }
 
-  // Streaming services can serve playback ads from the same media hosts as the selected
-  // program, so request blocking alone cannot distinguish them. Detect the player state and
-  // site-owned ad controls before changing playback.
   function isVisible(node) {
     return !!(node && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
-  }
-  // Prime's controls may be nested in open shadow roots. Search those roots as well as the
-  // document so each ad in a multi-ad break can expose its fresh timer and Skip Ad button.
-  function queryDeep(selector, root) {
-    root = root || document;
-    var match = root.querySelector(selector);
-    if (match) return match;
-    var elements = root.querySelectorAll('*');
-    for (var i = 0; i < elements.length; i++) {
-      if (!elements[i].shadowRoot) continue;
-      match = queryDeep(selector, elements[i].shadowRoot);
-      if (match) return match;
-    }
-    return null;
-  }
-  function queryDeepVisible(selector, root) {
-    root = root || document;
-    var matches = root.querySelectorAll(selector);
-    for (var i = 0; i < matches.length; i++) {
-      if (isVisible(matches[i])) return matches[i];
-    }
-    var elements = root.querySelectorAll('*');
-    for (var j = 0; j < elements.length; j++) {
-      if (!elements[j].shadowRoot) continue;
-      var match = queryDeepVisible(selector, elements[j].shadowRoot);
-      if (match) return match;
-    }
-    return null;
-  }
-  function findVisibleControlByText(pattern, root) {
-    root = root || document;
-    var controls = root.querySelectorAll('button, [role="button"]');
-    for (var i = 0; i < controls.length; i++) {
-      var control = controls[i];
-      var label = (control.getAttribute('aria-label') || control.textContent || '').trim();
-      if (pattern.test(label) && isVisible(control)) return control;
-    }
-    var elements = root.querySelectorAll('*');
-    for (var j = 0; j < elements.length; j++) {
-      if (!elements[j].shadowRoot) continue;
-      var match = findVisibleControlByText(pattern, elements[j].shadowRoot);
-      if (match) return match;
-    }
-    return null;
-  }
-  function findPrimeAdLabel(root) {
-    root = root || document;
-    var candidates = root.querySelectorAll('[aria-label], [data-testid], span, p');
-    var labelPattern = /^(ad|advertisement)(\s+\d+\s+of\s+\d+)?(?:\s*(?:[·•|\-]\s*)?\d{1,2}:\d{2})?(?:\s+(?:remaining|left))?$/i;
-    for (var i = 0; i < candidates.length; i++) {
-      var candidate = candidates[i];
-      var testID = candidate.getAttribute('data-testid') || '';
-      var label = candidate.getAttribute('aria-label') || (candidate.textContent || '').trim();
-      if ((/ad[-_](timer|indicator|break)/i.test(testID) || labelPattern.test(label)) && isVisible(candidate)) {
-        return candidate;
-      }
-    }
-    var elements = root.querySelectorAll('*');
-    for (var j = 0; j < elements.length; j++) {
-      if (!elements[j].shadowRoot) continue;
-      var match = findPrimeAdLabel(elements[j].shadowRoot);
-      if (match) return match;
-    }
-    return null;
-  }
-  function findSpotifyAdLabel(root) {
-    root = root || document;
-    var candidates = root.querySelectorAll(
-      '[data-testid="context-item-info-ad-subtitle"], [data-testid="ad-banner"], ' +
-      '[data-testid="now-playing-widget"] [data-testid="context-item-info-title"], ' +
-      '[data-testid*="ad" i], [aria-label*="advertisement" i], [aria-label="Ad" i]'
-    );
-    for (var i = 0; i < candidates.length; i++) {
-      var candidate = candidates[i];
-      var testID = candidate.getAttribute('data-testid') || '';
-      var label = (candidate.getAttribute('aria-label') || candidate.textContent || '').trim();
-      var hasAdTestID = /(^|[-_])(ad|advertisement)([-_]|$)/i.test(testID);
-      // A track title is free text ("Ad Astra", "Sponsored Content"), so it only counts
-      // when the whole title is the ad label Spotify shows during an ad.
-      var isTrackTitle = testID === 'context-item-info-title';
-      var hasAdLabel = isTrackTitle
-        ? /^(ad|advertisement|sponsored)$/i.test(label)
-        : /^(ad|advertisement|sponsored)(\b|\s|$)/i.test(label);
-      if ((hasAdTestID || hasAdLabel) && isVisible(candidate)) return candidate;
-    }
-    return null;
-  }
-  function restoreMedia() {
-    if (!state.adMedia) return;
-    var saved = state.adMedia;
-    if (saved.media) {
-      saved.media.defaultPlaybackRate = saved.defaultRate;
-      saved.media.playbackRate = saved.rate;
-      saved.media.muted = saved.muted;
-    }
-    state.adMedia = null;
-  }
-  function skipPlaybackAd() {
-    // Runs every 200ms. Walking every element (for shadow roots and text labels) is only
-    // needed on Prime Video; on other sites a plain lookup finds the player and its ad UI.
-    var isPrimeVideo = /(^|\.)(primevideo\.com|amazon\.[a-z.]+)$/.test(location.hostname);
-    var find = isPrimeVideo ? queryDeep : function (selector, root) { return (root || document).querySelector(selector); };
-    var player = find(
-      '#movie_player, .html5-video-player, #dv-web-player, ' +
-      '[class*="atvwebplayersdk-player"], [class~="ad-showing"], [class~="ad-interrupting"]'
-    );
-    var scope = player || document;
-    var adControl = find(
-      '.ytp-ad-player-overlay, .ytp-ad-text, .ytp-ad-preview-text, ' +
-      '.ytp-ad-simple-ad-badge, .ytp-ad-skip-button-container, ' +
-      '[class*="adtimeindicator"], [class*="ad-time-indicator"], ' +
-      '[class*="ad-timer"], [data-testid*="ad-timer"], ' +
-      '[data-testid="context-item-info-ad-subtitle"], [data-testid="ad-banner"], ' +
-      '[class*="ad-showing"], [class*="ad-interrupting"]', scope
-    );
-    var classes = player && player.classList;
-    var isAd = !!(classes && (classes.contains('ad-showing') ||
-      classes.contains('ad-interrupting'))) || isVisible(adControl);
-    if (!isAd && isPrimeVideo) isAd = !!findPrimeAdLabel(scope);
-    if (!isAd && /(^|\.)spotify\.com$/.test(location.hostname)) isAd = !!findSpotifyAdLabel(scope);
-
-    if (!isAd) { restoreMedia(); return; }
-
-    var skipSelector =
-      '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, ' +
-      '.ytp-ad-skip-button-slot button, button[class*="skip" i], ' +
-      '[class*="ad-skip-button"], [class*="skipelement-button"], ' +
-      '[data-testid*="skip-ad" i], button[aria-label*="skip ad" i], ' +
-      '[role="button"][aria-label*="skip ad" i], button[aria-label*="skip advertisement" i], ' +
-      '[data-testid*="skip-button" i], [data-testid*="skipButton"], ' +
-      '[class*="skipElement" i] button, [class*="skipElement" i][role="button"]';
-    var skip = queryDeepVisible(skipSelector, scope) ||
-      findVisibleControlByText(/^(skip|skip ad|skip ads|skip advertisement|skip advertisements)(\s+now)?$/i, scope);
-    if (skip) skip.click();
-
-    if (isPrimeVideo) {
-      // Prime owns the ad-to-content handoff. Muting, play(), seeking, or changing the rate on
-      // its media element can freeze the countdown in WKWebView, so only press its real skip UI.
-      restoreMedia();
-      return;
-    }
-
-    var media = find('video, audio', scope) || find('video, audio');
-    if (!media) return;
-    if (!state.adMedia || state.adMedia.media !== media) {
-      restoreMedia();
-      state.adMedia = {
-        media: media,
-        defaultRate: media.defaultPlaybackRate,
-        rate: media.playbackRate,
-        muted: media.muted
-      };
-    }
-    // Seeking removes most ads immediately. Fast, silent playback is the fallback for
-    // streams that reject seeking until their skip threshold has elapsed.
-    var isSpotify = /(^|\.)spotify\.com$/.test(location.hostname);
-    if (!isPrimeVideo && isFinite(media.duration) && media.duration > 0) {
-      try { media.currentTime = Math.max(0, media.duration - 0.05); } catch (e) {}
-    }
-    media.muted = true;
-    if (!isSpotify) {
-      try { media.playbackRate = 16; } catch (e) { media.playbackRate = 2; }
-    }
-    if (media.paused) media.play().catch(function () {});
-  }
-  function updateAdSkipping() {
-    var enabled = state.rules.some(function (r) { return r.action === 'skip_ads'; });
-    if (enabled && state.adTimer === null) {
-      installPlayerResponseSanitizer();
-      skipPlaybackAd();
-      state.adTimer = setInterval(skipPlaybackAd, 200);
-    } else if (!enabled && state.adTimer !== null) {
-      clearInterval(state.adTimer);
-      state.adTimer = null;
-      restoreMedia();
-    }
   }
 
   // MARK: autohide_top / autohide_bottom
@@ -419,7 +178,8 @@
       }
     });
     var selectors = nearTop
-      ? 'header,[role="banner"],ytm-mobile-topbar-renderer,ytmusic-nav-bar'
+      // YouTube Music draws its bar's background and divider as separate pinned layers.
+      ? 'header,[role="banner"],ytm-mobile-topbar-renderer,ytmusic-nav-bar,#nav-bar-background,#nav-bar-divider'
       : 'footer,nav,[role="navigation"],ytm-pivot-bar-renderer,ytmusic-player-bar';
     document.querySelectorAll(selectors).forEach(add);
     return found;
@@ -517,7 +277,6 @@
     state.rules = normalise(raw);
     writeStyle();
     checkLocation();
-    updateAdSkipping();
     scheduleScan();
     // Separate header/footer scrolling modes start visible and react to the next scroll.
     if (chrome.hidden) showChrome();

@@ -73,7 +73,9 @@ struct GlassScreen<Content: View>: View {
                 }
                 .padding(.horizontal, Layout.screenPadding)
                 .padding(.top, Space.s8)
-                .padding(.bottom, Space.s24)
+                // The floating dock overlays the screen rather than participating in this
+                // scroll view's layout. Keep the final controls fully above it.
+                .padding(.bottom, 104)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
             }
@@ -113,6 +115,7 @@ struct GlassScreenHeader: View {
                 .foregroundStyle(Neon.teal)
                 .frame(width: 52, height: 52)
                 .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: Space.s4) {
                 Text(title)
@@ -123,7 +126,8 @@ struct GlassScreenHeader: View {
                     .foregroundStyle(.white.opacity(0.68))
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -152,6 +156,7 @@ struct GlassSectionCard<Content: View>: View {
                     if let symbol {
                         Image(systemName: symbol)
                             .foregroundStyle(Neon.teal)
+                            .accessibilityHidden(true)
                     }
                 }
                 .font(TypeRole.headline)
@@ -166,6 +171,124 @@ struct GlassSectionCard<Content: View>: View {
     }
 }
 
+// MARK: - Focus hero
+
+struct FocusModeHero: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.s16) {
+                VStack(alignment: .leading, spacing: Space.s8) {
+                    Label("Focus Mode", systemImage: "leaf.fill")
+                        .font(TypeRole.title3)
+                        .foregroundStyle(.white)
+
+                    Text("Distraction-free watching and listening")
+                        .font(TypeRole.footnote)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: Space.s8)
+
+                Image(systemName: "play.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(
+                        LinearGradient(
+                            colors: [Neon.teal, Color(red: 0.02, green: 0.55, blue: 0.56)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: Circle()
+                    )
+                    .overlay {
+                        Circle().stroke(.white.opacity(0.55), lineWidth: 1)
+                    }
+                    .shadow(color: Neon.teal.opacity(0.65), radius: 16)
+            }
+            .padding(Space.s20)
+            .frame(maxWidth: .infinity, minHeight: 138, alignment: .leading)
+            .background {
+                FocusAuroraArtwork()
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.lg))
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Neon.teal.opacity(0.75), .white.opacity(0.12), Neon.violet.opacity(0.65)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: Neon.teal.opacity(0.18), radius: 18, y: 8)
+            .accessibilityElement(children: .combine)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Focus Mode")
+        .accessibilityHint("Opens focus session controls")
+    }
+}
+
+private struct FocusAuroraArtwork: View {
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(
+                    colors: [Neon.navy, Color(red: 0.02, green: 0.16, blue: 0.28), Neon.deepViolet],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+
+                Ellipse()
+                    .fill(Neon.teal.opacity(0.55))
+                    .frame(width: proxy.size.width * 0.7, height: 80)
+                    .blur(radius: 32)
+                    .rotationEffect(.degrees(-10))
+                    .offset(x: proxy.size.width * 0.2, y: -36)
+
+                Ellipse()
+                    .fill(Neon.violet.opacity(0.65))
+                    .frame(width: proxy.size.width * 0.55, height: 72)
+                    .blur(radius: 30)
+                    .rotationEffect(.degrees(12))
+                    .offset(x: -proxy.size.width * 0.25, y: -42)
+
+                MountainSilhouette()
+                    .fill(.black.opacity(0.48))
+                    .frame(height: proxy.size.height * 0.58)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MountainSilhouette: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.height * 0.66))
+        path.addLine(to: CGPoint(x: rect.width * 0.16, y: rect.height * 0.46))
+        path.addLine(to: CGPoint(x: rect.width * 0.28, y: rect.height * 0.58))
+        path.addLine(to: CGPoint(x: rect.width * 0.44, y: rect.height * 0.22))
+        path.addLine(to: CGPoint(x: rect.width * 0.58, y: rect.height * 0.50))
+        path.addLine(to: CGPoint(x: rect.width * 0.72, y: rect.height * 0.30))
+        path.addLine(to: CGPoint(x: rect.width * 0.86, y: rect.height * 0.57))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.height * 0.42))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Platform cards
 
 /// How each platform's Home card looks. Home only; the rest of the app uses the plain platform data.
@@ -173,99 +296,129 @@ struct GlassSectionCard<Content: View>: View {
 struct PlatformArt {
     let highlights: String
     let iconColor: Color
-    let artSymbol: String
     let artColors: [Color]
 
     static func forPlatform(_ id: String) -> PlatformArt {
         switch id {
         case "instagram":
-            return PlatformArt(highlights: "Friends\u{00A0}• Stories\u{00A0}• DMs", iconColor: Neon.teal,
-                               artSymbol: "sun.horizon.fill", artColors: [Neon.magenta, Neon.orange])
+            return PlatformArt(highlights: "Stories\u{00A0}• DMs", iconColor: Neon.magenta,
+                               artColors: [Neon.magenta, Neon.orange])
         case "youtube":
-            return PlatformArt(highlights: "Videos\u{00A0}• Channels\u{00A0}• Live", iconColor: Neon.red,
-                               artSymbol: "mountain.2.fill", artColors: [Neon.violet, Neon.blue])
+            return PlatformArt(highlights: "Videos\u{00A0}• Live", iconColor: Neon.red,
+                               artColors: [Neon.red, Neon.violet])
         case "youtube_music":
-            return PlatformArt(highlights: "Music\u{00A0}• Playlists\u{00A0}• Radio", iconColor: Neon.teal,
-                               artSymbol: "headphones", artColors: [Neon.violet, Neon.magenta])
+            return PlatformArt(highlights: "Playlists\u{00A0}• Radio", iconColor: Neon.teal,
+                               artColors: [Neon.violet, Neon.blue])
         case "netflix":
-            return PlatformArt(highlights: "Movies\u{00A0}• Series\u{00A0}• Originals", iconColor: Neon.red,
-                               artSymbol: "film.stack.fill", artColors: [Neon.red, Neon.navy])
+            return PlatformArt(highlights: "Movies\u{00A0}• Series", iconColor: Neon.red,
+                               artColors: [Neon.red, Neon.navy])
         case "amazon_prime":
-            return PlatformArt(highlights: "Movies\u{00A0}• Series\u{00A0}• Live", iconColor: Neon.blue,
-                               artSymbol: "play.tv.fill", artColors: [Neon.blue, Neon.teal])
+            return PlatformArt(highlights: "Movies\u{00A0}• Series", iconColor: Neon.blue,
+                               artColors: [Neon.blue, Neon.teal])
         case "spotify":
-            return PlatformArt(highlights: "Music\u{00A0}• Podcasts\u{00A0}• Playlists", iconColor: Neon.teal,
-                               artSymbol: "waveform", artColors: [Neon.teal, Neon.navy])
+            return PlatformArt(highlights: "Music\u{00A0}• Playlists", iconColor: Neon.teal,
+                               artColors: [Neon.teal, Neon.navy])
         default:
             return PlatformArt(highlights: "", iconColor: Neon.teal,
-                               artSymbol: "sparkles", artColors: [Neon.violet, Neon.blue])
+                               artColors: [Neon.violet, Neon.blue])
         }
     }
 }
 
-/// A Liquid Glass card that opens a platform. Its artwork fades in from the trailing edge,
-/// so the leading side, where the text sits, is plain glass over the background.
-struct PlatformCard: View {
+/// A compact Liquid Glass card that opens a platform: glowing icon, name and a short line of
+/// highlights over a soft wash of the platform's colours. Several fit on a row, so Home shows
+/// every service without much scrolling.
+struct ServiceCard: View {
     let platform: Platform
-    var isWide = false
+    var isFavorite = false
     let action: () -> Void
+    var toggleFavorite: () -> Void = {}
 
     private var art: PlatformArt { .forPlatform(platform.id) }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: Radius.lg, style: .continuous) }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: Space.s8) {
-                // The chevron sits up beside the icon so the subtitle below gets the card's full width.
-                HStack(alignment: .top) {
-                    Image(systemName: platform.symbol)
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(art.iconColor)
-                        .shadow(color: art.iconColor.opacity(0.6), radius: 8)
-                    Spacer(minLength: Space.s8)
-                    Image(systemName: "chevron.right")
-                        .font(TypeRole.footnote.weight(.bold))
-                        .foregroundStyle(Neon.teal)
-                        .frame(width: 30, height: 30)
-                        .background(.white.opacity(0.12), in: Circle())
-                }
-                Spacer(minLength: Space.s12)
+            VStack(spacing: Space.s4) {
+                Image(systemName: platform.symbol)
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(art.iconColor)
+                    .shadow(color: art.iconColor.opacity(0.6), radius: 8)
+                    .frame(height: 36)
+                    .padding(.bottom, Space.s4)
                 Text(platform.name)
-                    .font(TypeRole.title3)
+                    .font(TypeRole.footnote.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                // Wraps to a second line on half-width cards rather than being cut off.
-                Text(art.highlights.uppercased())
+                    .minimumScaleFactor(0.75)
+                Text(art.highlights)
                     .font(TypeRole.caption)
-                    .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            .padding(Space.s16)
-            .frame(maxWidth: .infinity, minHeight: 168, alignment: .leading)
-            .background(alignment: .trailing) { artwork }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Space.s8)
+            .padding(.vertical, Space.s12)
+            .frame(maxWidth: .infinity, minHeight: 108)
+            .background {
+                LinearGradient(colors: art.artColors.map { $0.opacity(0.35) },
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .accessibilityHidden(true)
+            }
+            .overlay(alignment: .topTrailing) {
+                if isFavorite {
+                    Image(systemName: "star.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.yellow)
+                        .padding(Space.s8)
+                        .accessibilityHidden(true)
+                }
+            }
             .clipShape(shape)
             .contentShape(shape)
-            .glassEffect(.regular.tint(Neon.violet.opacity(0.12)).interactive(), in: shape)
+            .glassEffect(.regular.interactive(), in: shape)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(platform.name)
-        .accessibilityHint("Opens \(platform.name)")
-    }
-
-    private var artwork: some View {
-        ZStack(alignment: .trailing) {
-            LinearGradient(colors: art.artColors.map { $0.opacity(0.75) },
-                           startPoint: .topTrailing, endPoint: .bottomLeading)
-            Image(systemName: art.artSymbol)
-                .font(.system(size: isWide ? 110 : 84))
-                .foregroundStyle(.white.opacity(0.14))
-                .padding(.trailing, Space.s12)
+        .contextMenu {
+            Button(action: toggleFavorite) {
+                Label(isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                      systemImage: isFavorite ? "star.slash" : "star")
+            }
         }
-        .mask(LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing))
-        .accessibilityHidden(true)
+        .accessibilityLabel(platform.name)
+        .accessibilityValue(isFavorite ? "Favorite" : "")
+        .accessibilityHint("Opens \(platform.name)")
+        .accessibilityAction(named: isFavorite ? "Remove from Favorites" : "Add to Favorites", toggleFavorite)
+    }
+}
+
+/// A small glass chip in Home's "Jump back in" row for a recently opened platform.
+struct RecentChip: View {
+    let platform: Platform
+    let action: () -> Void
+
+    private var art: PlatformArt { .forPlatform(platform.id) }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.s8) {
+                Image(systemName: platform.symbol)
+                    .foregroundStyle(art.iconColor)
+                    .accessibilityHidden(true)
+                Text(platform.name)
+                    .font(TypeRole.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .padding(.horizontal, Space.s12)
+            .frame(minHeight: Layout.minTap)
+            .contentShape(Capsule())
+            .glassEffect(.regular.interactive(), in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens \(platform.name)")
     }
 }
 
@@ -419,4 +572,26 @@ struct InsightsCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(insights.totalHidden) items filtered this week")
     }
+}
+
+#Preview("Service cards") {
+    let platforms = [
+        ("instagram", "Instagram", "camera"), ("youtube", "YouTube", "play.rectangle.fill"),
+        ("youtube_music", "YouTube Music", "music.note"), ("netflix", "Netflix", "film"),
+        ("amazon_prime", "Prime Video", "play.tv"), ("spotify", "Spotify", "waveform"),
+    ].map { id, name, symbol in
+        Platform(id: id, name: name, baseUrl: URL(string: "https://example.com")!, allowedHosts: [],
+                 symbol: symbol, tagline: nil, isPro: false)
+    }
+    VStack(alignment: .leading, spacing: Space.s16) {
+        WebTopBar(title: "YouTube", accountLabel: "Main", showsBack: true, onClose: {}, onMinimize: {})
+        HStack(spacing: Space.s8) {
+            ForEach(platforms.prefix(2)) { RecentChip(platform: $0) {} }
+        }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: Space.s12)], spacing: Space.s12) {
+            ForEach(platforms) { ServiceCard(platform: $0, isFavorite: $0.id == "youtube") {} }
+        }
+    }
+    .padding(Layout.screenPadding)
+    .background { AuroraBackground() }
 }

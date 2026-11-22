@@ -253,6 +253,8 @@ struct WebTopBar: View {
     let title: String
     var accountLabel: String? = nil
     var showsBack = false
+    /// The page is a single item someone sent, so Back returns to the chat it came from.
+    var backReturnsToChat = false
     var onClose: (() -> Void)? = nil
     var onPost: (() -> Void)? = nil
     var onMinimize: (() -> Void)? = nil
@@ -260,17 +262,27 @@ struct WebTopBar: View {
     var onAccount: () -> Void = {}
     var onReload: () -> Void = {}
 
-    /// Each control is its own piece of Liquid Glass floating over the backdrop, rather than
-    /// a solid bar. Glass shapes are 36pt, inside full 44pt tap targets.
+    /// A minimal header kept apart from the page, so it never sits over the site's own controls:
+    /// Back and the platform's name on the leading side, Refresh, Mini Player and Close on the
+    /// trailing side. Account and posting live in the name's menu. Each control is its own piece
+    /// of Liquid Glass; glass shapes are 36pt, inside full 44pt tap targets.
     var body: some View {
         GlassEffectContainer(spacing: Space.s4) {
-            HStack(spacing: Space.s8) {
+            HStack(spacing: Space.s4) {
                 if showsBack {
-                    glassIcon("chevron.backward", label: "Back to chat", action: onBack)
-                } else if let onClose {
-                    glassIcon("xmark", label: "Close", action: onClose)
+                    glassIcon("chevron.backward", label: backReturnsToChat ? "Back to chat" : "Back", action: onBack)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
-                Button(action: onAccount) {
+                Menu {
+                    Button(action: onAccount) {
+                        Label("Switch Account", systemImage: "person.crop.circle")
+                    }
+                    if let onPost {
+                        Button(action: onPost) {
+                            Label("Post", systemImage: "square.and.pencil")
+                        }
+                    }
+                } label: {
                     // Drops the account name before it ever cuts off the platform's name.
                     ViewThatFits(in: .horizontal) {
                         titleLabel(showingAccount: true)
@@ -283,33 +295,24 @@ struct WebTopBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Switch account")
+                .accessibilityLabel(accountLabel.map { "\(title), \($0)" } ?? title)
+                .accessibilityHint("Account and posting options")
                 // The title takes the free space before the spacer does.
                 .layoutPriority(1)
                 Spacer(minLength: 0)
-                if let onPost {
-                    Button(action: onPost) {
-                        Text("Post")
-                            .font(TypeRole.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.color.accent)
-                            .padding(.horizontal, Space.s12)
-                            .frame(minHeight: 36)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .frame(minHeight: Layout.minTap)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Explains how to post on this platform")
-                }
+                glassIcon("arrow.clockwise", label: "Refresh", action: onReload)
                 if let onMinimize {
                     glassIcon("pip.enter", label: "Shrink to mini player", action: onMinimize)
                 }
-                glassIcon("arrow.clockwise", label: "Reload", action: onReload)
+                if let onClose {
+                    glassIcon("xmark", label: "Close \(title)", action: onClose)
+                }
             }
         }
         .foregroundStyle(Theme.color.text)
         .padding(.horizontal, Space.s8)
         .frame(height: Layout.webTopBar + Space.s8)
+        .animation(Motion.gentle, value: showsBack)
     }
 
     private func titleLabel(showingAccount: Bool) -> some View {
@@ -496,7 +499,8 @@ struct DesignGallery: View {
                     Banner(kind: .error, text: "Purchase failed")
                 }
                 section("Web chrome & states") {
-                    WebTopBar(title: "Instagram", accountLabel: "personal", showsBack: true)
+                    WebTopBar(title: "Instagram", accountLabel: "personal", showsBack: true,
+                              backReturnsToChat: true, onClose: {}, onMinimize: {})
                     EmptyState(symbol: "wifi.slash", title: "You're offline", message: "Reconnect and try again.", actionTitle: "Try again")
                 }
             }

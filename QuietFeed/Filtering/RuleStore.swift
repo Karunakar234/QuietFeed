@@ -38,6 +38,7 @@ final class RuleStore {
     }
 
     func load() async {
+        guard ruleSet == nil else { return }
         ruleSet = await provider.loadRules()
     }
 
@@ -54,10 +55,11 @@ final class RuleStore {
 
     /// One switch per key, in file order.
     func toggles(for platformID: String) -> [RuleToggle] {
+        let platformRules = rules(for: platformID)
         var seen = Set<String>()
         var out: [RuleToggle] = []
-        for rule in rules(for: platformID) where seen.insert(rule.key).inserted {
-            let detail = rules(for: platformID).first { $0.key == rule.key && $0.detail != nil }?.detail
+        for rule in platformRules where seen.insert(rule.key).inserted {
+            let detail = platformRules.first { $0.key == rule.key && $0.detail != nil }?.detail
             out.append(RuleToggle(key: rule.key, title: rule.title, detail: detail, isPro: rule.isPro, defaultOn: rule.defaultOn))
         }
         return out

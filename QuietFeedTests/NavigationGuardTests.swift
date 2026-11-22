@@ -43,6 +43,29 @@ import Testing
         #expect(music.decide(url: try url(link), isMainFrame: true) == .cancel)
     }
 
+    @Test(arguments: [
+        "http://m.youtube.com/watch?v=abc",
+        "data:text/html,<script>alert(1)</script>",
+        "blob:https://m.youtube.com/id"
+    ])
+    func insecureOrSyntheticTopLevelDocumentsAreCancelled(_ link: String) throws {
+        let youtube = try navGuard("youtube")
+        #expect(youtube.decide(url: try url(link), isMainFrame: true) == .cancel)
+    }
+
+    @Test func safeEmbeddedDocumentsRemainAvailableToThePlatform() throws {
+        let youtube = try navGuard("youtube")
+        #expect(youtube.decide(url: try url("about:blank"), isMainFrame: false) == .allow)
+        #expect(youtube.decide(url: try url("blob:https://m.youtube.com/id"), isMainFrame: false) == .allow)
+    }
+
+    @Test func onlyAllowedTopLevelOriginsMaySendNativeMessages() throws {
+        let youtube = try navGuard("youtube")
+        #expect(youtube.isTrustedMessageOrigin(host: "m.youtube.com", isMainFrame: true))
+        #expect(!youtube.isTrustedMessageOrigin(host: "evil.example", isMainFrame: true))
+        #expect(!youtube.isTrustedMessageOrigin(host: "m.youtube.com", isMainFrame: false))
+    }
+
     @Test func shortsBecomeTheNormalWatchPage() throws {
         let youtube = try navGuard("youtube")
         let decision = youtube.decide(url: try url("https://m.youtube.com/shorts/abc_123"), isMainFrame: true)

@@ -16,6 +16,8 @@ final class WebModel: NSObject {
     private(set) var state: WebState = .loading(progress: 0)
     private(set) var isSingleItem = false
     private(set) var canGoBack = false
+    /// Where YouTube Music's own top bar keeps the slot QuietFeed's controls sit in.
+    private(set) var siteNavAnchor: SiteNavAnchor = .missing
     private(set) var isVideoFullscreen = false
     /// True while the person is scrolling down through the page: the screen hides its own bar
     /// and margins so the site gets the whole screen, leaving just a Close button.
@@ -33,9 +35,6 @@ final class WebModel: NSObject {
     /// When the person last tapped a link in the page; leaving the app needs a recent tap.
     @ObservationIgnored private var lastLinkTap: Date?
     private static let externalLinkGrace: TimeInterval = 10
-    /// Set by shutdown(). The first load waits for the ad rules, and the page may be closed
-    /// before they're ready; this stops that late load from starting in a closed page.
-    @ObservationIgnored private var isShutDown = false
     #if canImport(UIKit)
     @ObservationIgnored private var refreshControl: UIRefreshControl?
     #endif
@@ -141,13 +140,11 @@ final class WebModel: NSObject {
         })
         #endif
         observations = obs
-        // Load only after the ad rules are attached, so the first page request is filtered too.
-        Task { @MainActor [weak self] in
-            await AdBlocker.install(into: config.userContentController)
-            guard let self, !self.isShutDown else { return }
-            self.load(self.startURL ?? self.platform.baseUrl)
-        }
+        load(startURL ?? platform.baseUrl)
     }
+
+    /// The account whose website data this page uses.
+    var dataStoreID: UUID? { webView.configuration.websiteDataStore.identifier }
 
     private static var isRunningOnMac: Bool {
         #if os(macOS) || targetEnvironment(macCatalyst)
@@ -186,7 +183,6 @@ final class WebModel: NSObject {
     /// Immediately silences the page before its SwiftUI container disappears. WebKit processes
     /// can outlive their view briefly, so relying on deallocation alone lets audio continue.
     func shutdown() {
-        isShutDown = true
         isVideoFullscreen = false
         webView.evaluateJavaScript("""
         document.querySelectorAll('video, audio').forEach(function (media) {
@@ -199,20 +195,116 @@ final class WebModel: NSObject {
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "stillfeed")
+        observations.forEach { $0.invalidate() }
+        observations.removeAll()
+    }
+
+    /// Closing keeps the page for an instant reopen: playback stops as it would on close, but
+    /// the page stays loaded in the background.
+    func park() {
+        isVideoFullscreen = false
+        webView.evaluateJavaScript("""
+        document.querySelectorAll('video, audio').forEach(function (media) { media.pause(); });
+        """)
+        webView.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+    }
+
+    /// Reopening a parked page lets it play again; nothing starts by itself.
+    func unpark() {
+        webView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
     }
 
     func goBack() {
         if webView.canGoBack { webView.goBack() } else { loadHome() }
     }
 
+    /// Whether the page is a music player with next and previous songs.
+    var hasTrackControls: Bool { TrackButtons.forPlatform(platform.id) != nil }
+
+    /// The mini player's Next and Previous buttons; the same actions as the lock screen's.
+    func nextTrack() { runTrackAction("nexttrack") }
+    func previousTrack() { runTrackAction("previoustrack") }
+
+    private func runTrackAction(_ action: String) {
+        webView.evaluateJavaScript("window.__quietfeedTrack && window.__quietfeedTrack('\(action)');")
+    }
+
     /// Plays or pauses the page's video. The mini-player's button, since the page's own
-    /// controls are too small to use there.
+    /// controls are too small to use there. Music players use their own play button instead,
+    /// since Spotify's audio isn't on the page.
     func togglePlayback() {
+        if hasTrackControls { return runTrackAction("playpause") }
         webView.evaluateJavaScript("""
         (function () {
           var media = document.querySelector('video');
           if (!media) return;
           if (media.paused) { media.play().catch(function () {}); } else { media.pause(); }
+        })();
+        """)
+    }
+
+    /// Leaving QuietFeed with a video playing moves it into the system's floating Picture in
+    /// Picture window, so only the video carries on over other apps, on every platform. It has
+    /// to start while the app is still active (iOS refuses once it's in the background), and
+    /// scripts the app runs count as a user gesture, which the request needs. Music without a
+    /// picture (a YouTube Music song, Spotify) has no video track and keeps playing as audio.
+    /// Sites that turn Picture in Picture off are allowed it again for this video.
+    func enterPictureInPictureIfPlaying() {
+        webView.evaluateJavaScript("""
+        (function () {
+          var videos = document.querySelectorAll('video');
+          var seen = [];
+          for (var i = 0; i < videos.length; i++) {
+            var video = videos[i];
+            seen.push([video.paused, video.ended, video.readyState, video.videoWidth].join('/'));
+            if (video.paused || video.ended || video.readyState < 2 || !video.videoWidth) continue;
+            video.removeAttribute('disablepictureinpicture');
+            video.disablePictureInPicture = false;
+            var supports = !!(video.webkitSupportsPresentationMode && video.webkitSupportsPresentationMode('picture-in-picture'));
+            if (supports) {
+              video.webkitSetPresentationMode('picture-in-picture');
+            } else if (video.requestPictureInPicture) {
+              video.requestPictureInPicture().catch(function (e) {
+                window.webkit.messageHandlers.stillfeed.postMessage({ type: 'debug', message: 'pip rejected ' + e });
+              });
+            }
+            return 'requested supports=' + supports + ' mode=' + video.webkitPresentationMode;
+          }
+          return 'no playing video: ' + seen.join(' ');
+        })();
+        """) { result, error in
+            #if DEBUG
+            print("[QF-PIP]", result ?? "nil", error.map { "\($0)" } ?? "")
+            #endif
+        }
+    }
+
+    /// The second route into Picture in Picture: each video that starts playing is marked as
+    /// allowed to float on its own when the app leaves the screen (WebKit's auto Picture in
+    /// Picture), and any site switch that turns Picture in Picture off is undone.
+    private static let allowPictureInPictureSource = """
+    (function () {
+      document.addEventListener('play', function (event) {
+        var video = event.target;
+        if (!video || video.tagName !== 'VIDEO') return;
+        video.removeAttribute('disablepictureinpicture');
+        video.disablePictureInPicture = false;
+        video.setAttribute('autopictureinpicture', '');
+        try { video.autoPictureInPicture = true; } catch (e) { /* not supported here */ }
+      }, true);
+    })();
+    """
+
+    /// Back in QuietFeed, the video returns from the floating window to the page and keeps playing.
+    func exitPictureInPicture() {
+        webView.evaluateJavaScript("""
+        (function () {
+          document.querySelectorAll('video').forEach(function (video) {
+            if (video.webkitPresentationMode === 'picture-in-picture') video.webkitSetPresentationMode('inline');
+          });
+          if (document.pictureInPictureElement && document.exitPictureInPicture) {
+            document.exitPictureInPicture().catch(function () {});
+          }
         })();
         """)
     }
@@ -262,6 +354,11 @@ final class WebModel: NSObject {
         controller.removeAllUserScripts()
         installScripts(rules, into: controller)
         webView.evaluateJavaScript("window.__stillfeed && window.__stillfeed.update(\(Self.json(rules)));")
+        if SiteBarSlot.forPlatform(platform.id) != nil {
+            let enabled = Self.hidesHeader(rules)
+            webView.evaluateJavaScript("window.__quietfeedNavAnchor && window.__quietfeedNavAnchor.setEnabled(\(enabled));")
+            if !enabled { siteNavAnchor = .missing }
+        }
         isSingleItem = navGuard.isSingleItem(url: webView.url)
     }
 
@@ -285,6 +382,13 @@ final class WebModel: NSObject {
                 forMainFrameOnly: true
             ))
         }
+        if let slot = SiteBarSlot.forPlatform(platform.id) {
+            controller.addUserScript(WKUserScript(
+                source: Self.navAnchorSource(slot, enabled: Self.hidesHeader(rules)),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
         if platform.id == "youtube" || platform.id == "youtube_music" {
             controller.addUserScript(WKUserScript(
                 source: Self.keepVisibleSource,
@@ -292,12 +396,21 @@ final class WebModel: NSObject {
                 forMainFrameOnly: true
             ))
         }
-        if platform.id == "youtube_music" {
+        #if os(iOS)
+        controller.addUserScript(WKUserScript(
+            source: Self.allowPictureInPictureSource,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: !Self.videoPlatformIDs.contains(platform.id)
+        ))
+        #endif
+        if let buttons = TrackButtons.forPlatform(platform.id) {
             controller.addUserScript(WKUserScript(
-                source: Self.trackControlsSource,
+                source: Self.trackControlsSource(buttons),
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             ))
+        }
+        if platform.id == "youtube_music" {
             controller.addUserScript(WKUserScript(
                 source: Self.releaseHiddenModalSource,
                 injectionTime: .atDocumentStart,
@@ -311,9 +424,50 @@ final class WebModel: NSObject {
             ))
             #endif
         }
+        #if DEBUG
+        if platform.id == "spotify" {
+            controller.addUserScript(WKUserScript(
+                source: Self.spotifyAdDiagnosticsSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
+        #endif
     }
 
     #if DEBUG
+    /// Temporary: logs what Spotify shows while something plays (page title, lock-screen details,
+    /// the now-playing bar's text and links, the playing media, and whether the engine muted it),
+    /// whenever any of it changes, to see what a real ad or promo looks like. Prints as [QF-AD].
+    private static let spotifyAdDiagnosticsSource = """
+    (function () {
+      var last = '';
+      setInterval(function () {
+        var meta = navigator.mediaSession && navigator.mediaSession.metadata;
+        var widget = document.querySelector('[data-testid="now-playing-widget"]');
+        var links = widget ? Array.prototype.map.call(widget.querySelectorAll('a[href]'), function (a) {
+          return (a.getAttribute('data-testid') || 'a') + '=' + a.getAttribute('href');
+        }) : [];
+        var testids = widget ? Array.prototype.map.call(widget.querySelectorAll('[data-testid]'), function (el) {
+          return el.getAttribute('data-testid');
+        }) : [];
+        var media = Array.prototype.map.call(document.querySelectorAll('video, audio'), function (m) {
+          return m.tagName + (m.paused ? ' paused' : ' playing') + (m.muted ? ' muted' : '') +
+            ' dur=' + Math.round(m.duration || 0) + ' src=' + String(m.currentSrc || m.src || '').slice(0, 60);
+        });
+        var report = 'title=' + document.title +
+          ' | meta=' + (meta ? [meta.title, meta.artist, meta.album].join(' / ') : 'none') +
+          ' | bar=' + (widget ? (widget.textContent || '').trim().slice(0, 120) : 'none') +
+          ' | links=' + links.join(', ') +
+          ' | testids=' + testids.join(',') +
+          ' | domMedia=' + media.join('; ');
+        if (report === last) return;
+        last = report;
+        try { window.webkit.messageHandlers.stillfeed.postMessage({ type: 'debug', message: '[QF-AD] ' + report.slice(0, 1500) }); } catch (e) {}
+      }, 1000);
+    })();
+    """
+
     /// Temporary: logs what each tap lands on, pop-ups that appear, and media events, to find
     /// why taps on YouTube Music songs don't play on a real iPhone.
     private static let tapDiagnosticsSource = """
@@ -370,47 +524,75 @@ final class WebModel: NSObject {
 
     /// The lock screen and Control Center build their buttons from the page's media session:
     /// seek handlers give ±10 second buttons, track handlers give next and previous song.
-    /// For YouTube Music this drops the seek handlers and makes sure there are track handlers,
-    /// using YouTube Music's own if it registers them, or pressing its Next/Previous buttons if not.
-    private static let trackControlsSource = """
-    (function () {
-      var session = navigator.mediaSession;
-      if (!session || typeof session.setActionHandler !== 'function') return;
-      var original = session.setActionHandler.bind(session);
-      var pageHas = { nexttrack: false, previoustrack: false };
-      function set(action, handler) {
-        try { original(action, handler); } catch (e) { /* action not supported here */ }
-      }
+    /// For music services this drops the seek handlers and makes sure there are track handlers,
+    /// using the site's own if it registers them, or pressing its Next/Previous buttons if not.
+    /// It also gives QuietFeed's mini player the same actions (`window.__quietfeedTrack`), since
+    /// the site's player bar may leave Next out on a narrow screen and Spotify's audio isn't on
+    /// the page for QuietFeed to reach directly.
+    private static func trackControlsSource(_ buttons: TrackButtons) -> String {
+        """
+        (function () {
+          var buttons = {
+            nexttrack: \(jsonLiteral(buttons.next)),
+            previoustrack: \(jsonLiteral(buttons.previous)),
+            playpause: \(jsonLiteral(buttons.playPause))
+          };
+          var pageHandlers = {};
+          function press(selectors) {
+            for (var i = 0; i < selectors.length; i++) {
+              var button = document.querySelector(selectors[i]);
+              if (button && !button.disabled) { button.click(); return true; }
+            }
+            return false;
+          }
+          function playing() {
+            var media = document.querySelectorAll('video, audio');
+            for (var i = 0; i < media.length; i++) if (!media[i].paused) return media[i];
+            return null;
+          }
+          // The site's own handler first (it knows its queue), else its button.
+          window.__quietfeedTrack = function (action) {
+            if (action === 'playpause') {
+              if (press(buttons.playpause)) return;
+              var media = playing();
+              var handler = pageHandlers[media ? 'pause' : 'play'];
+              if (handler) { handler({ action: media ? 'pause' : 'play' }); return; }
+              if (media) { media.pause(); return; }
+              var first = document.querySelector('video, audio');
+              if (first) first.play().catch(function () {});
+              return;
+            }
+            if (pageHandlers[action]) { pageHandlers[action]({ action: action }); return; }
+            press(buttons[action] || []);
+          };
 
-      session.setActionHandler = function (action, handler) {
-        if (action === 'seekforward' || action === 'seekbackward') return set(action, null);
-        if (action in pageHas) pageHas[action] = !!handler;
-        return set(action, handler);
-      };
+          var session = navigator.mediaSession;
+          if (!session || typeof session.setActionHandler !== 'function') return;
+          var original = session.setActionHandler.bind(session);
+          function set(action, handler) {
+            try { original(action, handler); } catch (e) { /* action not supported here */ }
+          }
 
-      var buttons = {
-        nexttrack: ['.next-button', 'button[aria-label="Next"]', 'button[aria-label="Next song"]'],
-        previoustrack: ['.previous-button', 'button[aria-label="Previous"]', 'button[aria-label="Previous song"]']
-      };
-      function press(selectors) {
-        for (var i = 0; i < selectors.length; i++) {
-          var button = document.querySelector(selectors[i]);
-          if (button) { button.click(); return; }
-        }
-      }
-      function useTrackControls() {
-        set('seekforward', null);
-        set('seekbackward', null);
-        Object.keys(buttons).forEach(function (action) {
-          if (!pageHas[action]) set(action, function () { press(buttons[action]); });
-        });
-      }
+          session.setActionHandler = function (action, handler) {
+            if (action === 'seekforward' || action === 'seekbackward') return set(action, null);
+            pageHandlers[action] = handler || null;
+            return set(action, handler);
+          };
 
-      // Media "play" events don't bubble, so listen in the capture phase. Each new song reapplies it.
-      document.addEventListener('play', useTrackControls, true);
-      useTrackControls();
-    })();
-    """
+          function useTrackControls() {
+            set('seekforward', null);
+            set('seekbackward', null);
+            ['nexttrack', 'previoustrack'].forEach(function (action) {
+              if (!pageHandlers[action]) set(action, function () { press(buttons[action]); });
+            });
+          }
+
+          // Media "play" events don't bubble, so listen in the capture phase. Each new song reapplies it.
+          document.addEventListener('play', useTrackControls, true);
+          useTrackControls();
+        })();
+        """
+    }
 
     /// While a pop-up is open, YouTube Music makes the rest of the page `inert`, which ignores
     /// every tap (scrolling still works, as it's native). If a filter hides that pop-up, nothing
@@ -440,6 +622,168 @@ final class WebModel: NSObject {
       document.addEventListener('touchstart', check, true);
     })();
     """
+
+    private static func hidesHeader(_ rules: [FilterRule]) -> Bool {
+        rules.contains { $0.key == "hide_header" }
+    }
+
+    /// YouTube Music's top bar has no free space when signed out (search sits mid-bar), so
+    /// QuietFeed's Back and Close take the place of the site's logo, which only links to Home
+    /// (as the bottom Home tab does). The logo is hidden but keeps a slot wide enough for the two
+    /// buttons, and the page reports where that slot is, so the buttons line up with the site's
+    /// icons and leave with the bar when it scrolls away. "missing" means the bar isn't there
+    /// (yet, or the site changed), and QuietFeed falls back to its own strip of controls.
+    /// Every platform's own top bar shows its logo, which only links to the site's home. QuietFeed's
+    /// Back and Close take that place: the logo is hidden but keeps a slot wide enough for the two
+    /// buttons, and the page reports where the slot is, so the buttons line up with the site's
+    /// icons and leave with the bar when it scrolls away. "missing" means no logo was found at the
+    /// top of the page (yet, or the site changed), and QuietFeed falls back to its own strip.
+    private static func navAnchorSource(_ slot: SiteBarSlot, enabled: Bool) -> String {
+        """
+        (function () {
+          if (window.__quietfeedNavAnchor) return;
+          var STYLE_ID = 'quietfeed-nav-anchor';
+          var MARK = 'data-quietfeed-slot';
+          var LOGOS = \(jsonLiteral(slot.logo));
+          var BAR = \(jsonLiteral(slot.bar ?? ""));
+          var enabled = \(enabled);
+          var last = null, frame = null, followUntil = 0;
+
+          function setStyle() {
+            var style = document.getElementById(STYLE_ID);
+            if (!enabled) {
+              if (style) style.remove();
+              document.querySelectorAll('[' + MARK + ']').forEach(function (el) { el.removeAttribute(MARK); });
+              return;
+            }
+            if (style || !document.documentElement) return;
+            style = document.createElement('style');
+            style.id = STYLE_ID;
+            // YouTube Music's 1px divider sits below the screen edge, so it isn't slid away with
+            // the bar; the app has none, so it's simply removed.
+            style.textContent = '[' + MARK + ']{visibility:hidden!important;min-width:\(Int(SiteNavAnchor.slotWidth))px!important;flex-shrink:0!important;}' +
+              '#nav-bar-divider{display:none!important;}';
+            (document.head || document.documentElement).appendChild(style);
+          }
+          function post(message) {
+            var key = JSON.stringify(message);
+            if (key === last) return;
+            last = key;
+            window.webkit.messageHandlers.stillfeed.postMessage(message);
+          }
+          // A logo only counts when it's drawn and sits inside a short bar at the top of the page,
+          // so an invisible match or a logo in a footer never takes the controls away.
+          function slotFor(logo) {
+            var bar = findBar(logo);
+            if (!bar) return null;
+            var box = bar.getBoundingClientRect();
+            var slot = logo.getBoundingClientRect();
+            if (box.height === 0 || box.height > 140 || box.top > 120) return null;
+            if (slot.width === 0 || slot.height === 0) return null;
+            if (slot.top < box.top - 2 || slot.bottom > box.bottom + 2) return null;
+            // Something drawn over the bar (Spotify's full-screen player, a sheet) has its own
+            // controls there; the buttons would cover them. The hidden logo itself can't be hit,
+            // so what's normally under its middle is the bar. Off screen counts as not covered.
+            var x = slot.left + slot.width / 2, y = slot.top + slot.height / 2;
+            if (y >= 0 && y < window.innerHeight) {
+              var hit = document.elementFromPoint(x, y);
+              if (hit && !bar.contains(hit) && !hit.contains(bar)) return null;
+            }
+            return { logo: logo, slot: slot, box: box };
+          }
+          // The marked logo while it still counts, else the first match that does, in the
+          // selectors' priority order. The logo is the link around a logo image, if there is one.
+          function findSlot() {
+            var marked = document.querySelector('[' + MARK + ']');
+            if (marked) {
+              var kept = slotFor(marked);
+              if (kept) return kept;
+              // A bar that scrolls with the page (Netflix's) has simply gone up out of view.
+              if (marked.isConnected && marked.getBoundingClientRect().bottom <= 0) return { offscreen: true };
+              marked.removeAttribute(MARK);
+            }
+            for (var i = 0; i < LOGOS.length; i++) {
+              var matches = [];
+              try { matches = document.querySelectorAll(LOGOS[i]); } catch (e) { /* unsupported selector */ }
+              for (var j = 0; j < matches.length; j++) {
+                var logo = matches[j].closest('a,button') || matches[j];
+                var found = slotFor(logo);
+                if (found) {
+                  logo.setAttribute(MARK, '');
+                  // Measure again: keeping the slot wide can move the logo.
+                  return slotFor(logo) || found;
+                }
+              }
+            }
+            return null;
+          }
+          // The site's configured bar, else the pinned (fixed or sticky) bar the logo sits in,
+          // else the widest short row around it.
+          function findBar(logo) {
+            if (BAR) return logo.closest(BAR);
+            var row = null;
+            for (var el = logo.parentElement; el && el !== document.body; el = el.parentElement) {
+              var position = getComputedStyle(el).position;
+              if (position === 'fixed' || position === 'sticky') return el;
+              var box = el.getBoundingClientRect();
+              if (box.height > 120) break;
+              if (box.width >= window.innerWidth * 0.6) row = el;
+            }
+            return row;
+          }
+          function report() {
+            frame = null;
+            setStyle();
+            if (!enabled) return;
+            var found = findSlot();
+            if (!found) {
+              post({ type: 'navAnchor', state: 'missing' });
+            } else {
+              var slot = found.slot, box = found.box;
+              // Off screen only once the bar has moved up and mostly out of view.
+              if (found.offscreen || (box.top < 0 && box.bottom < box.height / 2)) {
+                post({ type: 'navAnchor', state: 'offscreen' });
+              } else {
+                // Centre on the logo's drawn image, where the person sees the logo. A link can
+                // be taller than its image (Netflix's includes screen-reader text below it).
+                var image = found.logo.matches('svg,img') ? found.logo : found.logo.querySelector('svg,img');
+                var art = image && image.getBoundingClientRect();
+                var middle = art && art.height > 0 ? art.top + art.height / 2 : box.top + box.height / 2;
+                post({ type: 'navAnchor', state: 'visible',
+                       x: Math.round(slot.left), y: Math.round(middle - box.height / 2),
+                       width: Math.round(slot.width), height: Math.round(box.height) });
+              }
+            }
+            if (Date.now() < followUntil) schedule();
+          }
+          function schedule() { if (frame === null) frame = requestAnimationFrame(report); }
+          // Follow the bar frame by frame while it slides (FilterEngine moves it over 0.25s).
+          function follow() { followUntil = Date.now() + 400; schedule(); }
+          window.addEventListener('scroll', follow, true);
+          window.addEventListener('resize', schedule);
+          document.addEventListener('transitionrun', follow, true);
+          document.addEventListener('transitionend', schedule, true);
+          // A slow check catches pages the site builds or swaps without scrolling.
+          setInterval(schedule, 500);
+          // QuietFeed forgets the slot whenever a page commits, including one restored from the
+          // back-forward cache, where this script keeps running. Send it again then, even if
+          // it hasn't moved, or the app would wait for a change that never comes.
+          function resend() { last = null; schedule(); }
+          window.addEventListener('pageshow', resend);
+          window.addEventListener('popstate', resend);
+          window.__quietfeedNavAnchor = {
+            setEnabled: function (value) { enabled = !!value; last = null; setStyle(); schedule(); },
+            resend: resend
+          };
+          schedule();
+        })();
+        """
+    }
+
+    /// A string or list of strings as a JavaScript literal.
+    private static func jsonLiteral(_ value: some Encodable) -> String {
+        (try? JSONEncoder().encode(value)).map { String(decoding: $0, as: UTF8.self) } ?? "null"
+    }
 
     /// YouTube pauses its player when the page reports that it's hidden, which is what iOS
     /// tells it when QuietFeed goes to the background. This keeps the page reporting "visible"
@@ -599,17 +943,19 @@ final class WebModel: NSObject {
 
     fileprivate func handleMessage(_ message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+        let host = message.frameInfo.securityOrigin.host
+        guard navGuard.isTrustedMessageOrigin(host: host, isMainFrame: message.frameInfo.isMainFrame) else {
+            return
+        }
         switch type {
         case "hidden":
             guard let count = body["count"] as? NSNumber else { return }
             insights.recordHidden(min(max(count.intValue, 0), Self.maxHiddenPerMessage))
         case "videoFullscreen":
-            // Full screen hides QuietFeed's bar and Close button, so only the platform's own
-            // top-level page may turn it on, never an embedded (ad or third-party) frame.
-            let host = message.frameInfo.securityOrigin.host.lowercased()
-            let isPlatformPage = platform.allowedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
-            guard message.frameInfo.isMainFrame, isPlatformPage else { return }
             isVideoFullscreen = (body["active"] as? Bool) ?? false
+        case "navAnchor":
+            guard SiteBarSlot.forPlatform(platform.id) != nil else { return }
+            siteNavAnchor = SiteNavAnchor(message: body)
         #if DEBUG
         case "debug":
             print("[QF-TAP]", body["message"] as? String ?? "")
@@ -666,6 +1012,9 @@ extension WebModel: WKNavigationDelegate {
     /// the app's bar and Close button must come back rather than stay hidden for good.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         isVideoFullscreen = false
+        siteNavAnchor = .missing
+        // A page restored from the back-forward cache keeps its scripts; ask it to report again.
+        webView.evaluateJavaScript("window.__quietfeedNavAnchor && window.__quietfeedNavAnchor.resend();")
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -712,8 +1061,11 @@ extension WebModel: WKUIDelegate {
             switch navGuard.decide(url: url, isMainFrame: true) {
             case .allow: webView.load(URLRequest(url: url))
             case .redirect(let destination): webView.load(URLRequest(url: destination))
-            // WebKit only asks for a new window after a tap (pop-ups need a user gesture).
-            case .external(let outside): openExternally(outside)
+            case .external(let outside):
+                // Scripted pop-ups must not be able to move the person into another app.
+                if navigationAction.navigationType == .linkActivated {
+                    openExternally(outside)
+                }
             case .cancel: break
             }
         }
@@ -732,5 +1084,108 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.handleMessage(message)
+    }
+}
+
+/// A music site's own Next, Previous and Play/Pause buttons, pressed when the site hasn't given
+/// the lock screen its own track actions. Several selectors each, in priority order.
+struct TrackButtons {
+    let next: [String]
+    let previous: [String]
+    let playPause: [String]
+
+    static func forPlatform(_ id: String) -> TrackButtons? {
+        switch id {
+        case "youtube_music":
+            return TrackButtons(
+                next: [".next-button", "button[aria-label=\"Next\"]", "button[aria-label=\"Next song\"]"],
+                previous: [".previous-button", "button[aria-label=\"Previous\"]", "button[aria-label=\"Previous song\"]"],
+                playPause: ["#play-pause-button", "ytmusic-player-bar .play-pause-button"])
+        case "spotify":
+            return TrackButtons(
+                next: ["[data-testid=\"control-button-skip-forward\"]", "button[aria-label=\"Next\"]"],
+                previous: ["[data-testid=\"control-button-skip-back\"]", "button[aria-label=\"Previous\"]"],
+                playPause: ["[data-testid=\"control-button-playpause\"]",
+                            "[data-testid=\"now-playing-bar\"] button[aria-label=\"Play\"]",
+                            "[data-testid=\"now-playing-bar\"] button[aria-label=\"Pause\"]"])
+        default:
+            return nil
+        }
+    }
+}
+
+/// How to find each site's logo in its top bar, the place QuietFeed's Back and Close take.
+/// Several selectors per site, so a small redesign still matches one of them.
+struct SiteBarSlot {
+    /// Selectors for the logo (or the logo's image; the link around it is used), tried in order,
+    /// so a broad last resort only counts when the precise ones miss.
+    let logo: [String]
+    /// The bar the logo sits in, when the site names it; otherwise the logo's pinned ancestor.
+    var bar: String? = nil
+
+    static func forPlatform(_ id: String) -> SiteBarSlot? {
+        switch id {
+        case "youtube_music":
+            return SiteBarSlot(
+                logo: ["ytmusic-nav-bar a.ytmusic-logo", "ytmusic-nav-bar a[title=\"Home\"]", "ytmusic-nav-bar a[aria-label=\"Home\"]"],
+                bar: "ytmusic-nav-bar")
+        case "youtube":
+            return SiteBarSlot(
+                logo: ["ytm-mobile-topbar-renderer ytm-home-logo", "ytm-mobile-topbar-renderer #home-icon",
+                       "header.mobile-topbar-header a[aria-label*=\"YouTube\"]"],
+                bar: "ytm-mobile-topbar-renderer, header.mobile-topbar-header")
+        case "instagram":
+            // Signed out, the wordmark sits mid-page rather than in a bar, so this falls back.
+            return SiteBarSlot(logo: ["svg[aria-label=\"Instagram\"]", "a[href=\"/\"] i[aria-label=\"Instagram\"]"])
+        case "netflix":
+            // The logo is an unlabelled image beside screen-reader text, inside the header's home link.
+            return SiteBarSlot(logo: ["[data-uia*=\"logo\" i]", "a.logo", "a[aria-label=\"Netflix\"]",
+                                      "header a[href=\"/\"]", "[role=\"banner\"] a[href=\"/\"]",
+                                      "header a[href^=\"/\"]:has(svg)", "[role=\"banner\"] a[href^=\"/\"]:has(svg)",
+                                      "header svg"])
+        case "amazon_prime":
+            // The logo is the navigation bar's link named "Home", named by its image rather than
+            // a label, so it's also found by where it links.
+            return SiteBarSlot(logo: ["[role=\"banner\"] a[aria-label=\"Home\"]", "header a[aria-label=\"Home\"]",
+                                      "nav a[aria-label=\"Home\"]", "a[data-testid*=\"logo\" i]",
+                                      "[role=\"banner\"] nav a[href*=\"storefront\"]:has(svg, img)",
+                                      "header nav a[href*=\"storefront\"]:has(svg, img)",
+                                      "[role=\"banner\"] a[href*=\"nb_logo\"]", "header a[href*=\"nb_logo\"]",
+                                      "[role=\"banner\"] nav > a:has(svg, img)", "header nav > a:has(svg, img)",
+                                      "a[aria-label=\"Prime Video\"]"])
+        case "spotify":
+            return SiteBarSlot(logo: ["a[aria-label=\"Spotify\"]", "svg[aria-label=\"Spotify\"]"])
+        default:
+            return nil
+        }
+    }
+}
+
+/// Where a site's own top bar has room for QuietFeed's controls, as reported by the page.
+enum SiteNavAnchor: Equatable {
+    /// The bar isn't on the page; QuietFeed shows its own controls instead.
+    case missing
+    /// The bar has scrolled out of view, so the controls go with it.
+    case offscreen
+    /// The slot's position in the web view, in points: the logo's x-range, the bar's height.
+    case visible(CGRect)
+
+    /// Room the page keeps free for Back and Close, two 44pt tap targets.
+    static let slotWidth: CGFloat = 88
+
+    init(message body: [String: Any]) {
+        switch body["state"] as? String {
+        case "offscreen":
+            self = .offscreen
+        case "visible":
+            let value = { (key: String) in CGFloat((body[key] as? NSNumber)?.doubleValue ?? 0) }
+            let rect = CGRect(x: value("x"), y: value("y"), width: value("width"), height: value("height"))
+            // Ignore anything that couldn't be a top bar, so a page can't place the controls oddly.
+            let plausible = rect.height > 0 && rect.height < 200 && rect.minX >= 0 && rect.minX < 400
+                && rect.minY > -200 && rect.minY < 200
+            self = plausible ? .visible(rect) : .missing
+        default:
+            self = .missing
+        }
     }
 }

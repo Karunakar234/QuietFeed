@@ -19,7 +19,6 @@ struct FilterRule: Codable, Hashable {
         static let redirect = "redirect"
         static let blockNavigation = "block_navigation"
         static let disableScroll = "disable_scroll"
-        static let skipAds = "skip_ads"
     }
 
     let platformId: String

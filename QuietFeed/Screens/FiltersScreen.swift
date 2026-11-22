@@ -5,6 +5,7 @@ import SwiftUI
 struct FiltersScreen: View {
     @Environment(RuleStore.self) private var ruleStore
     @Query(sort: \PlatformSetting.sortOrder) private var settings: [PlatformSetting]
+    @AppStorage("showFocusModeCard") private var showFocusModeCard = true
 
     private var activeSettings: [PlatformSetting] {
         settings.filter(\.isEnabled)
@@ -16,6 +17,8 @@ struct FiltersScreen: View {
             subtitle: "Shape every platform around what you actually want to see.",
             symbol: "slider.horizontal.3"
         ) {
+            HomeDisplayFiltersCard(showFocusModeCard: $showFocusModeCard)
+
             if activeSettings.isEmpty {
                 GlassSectionCard {
                     EmptyState(
@@ -31,6 +34,21 @@ struct FiltersScreen: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private struct HomeDisplayFiltersCard: View {
+    @Binding var showFocusModeCard: Bool
+
+    var body: some View {
+        GlassSectionCard("Home", symbol: "house.fill") {
+            ToggleRow(
+                title: "Show Focus Mode card",
+                subtitle: "Display the large Focus Mode shortcut at the top of Home.",
+                isOn: $showFocusModeCard
+            )
+            .padding(.vertical, Space.s4)
         }
     }
 }

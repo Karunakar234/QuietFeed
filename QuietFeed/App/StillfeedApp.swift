@@ -6,6 +6,9 @@ import SwiftUI
 struct StillfeedApp: App {
     @State private var ruleStore = RuleStore(provider: BundledRuleProvider(), preloaded: BundledRuleProvider.loadNow())
     @State private var insights = WeeklyInsightsStore()
+    @State private var focus = FocusSessionStore()
+    @State private var usage = UsageStore()
+    @State private var offlineAudio = OfflineAudioLibrary()
 
     init() {
         #if canImport(AVFAudio) && !os(macOS)
@@ -36,6 +39,9 @@ struct StillfeedApp: App {
         RootView()
             .environment(ruleStore)
             .environment(insights)
+            .environment(focus)
+            .environment(usage)
+            .environment(offlineAudio)
             .tint(Theme.color.accent)
             // The neon look is designed for dark mode, so the whole app uses it.
             .preferredColorScheme(.dark)
