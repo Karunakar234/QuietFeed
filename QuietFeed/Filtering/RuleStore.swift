@@ -9,6 +9,12 @@ protocol RuleProviding {
 
 struct BundledRuleProvider: RuleProviding {
     func loadRules() async -> RuleSet {
+        Self.loadNow()
+    }
+
+    /// Reads the bundled rules straight away. The file is small, so the app can have its
+    /// rules before the first frame and open on Home instead of a loading screen.
+    static func loadNow() -> RuleSet {
         guard let url = Bundle.main.url(forResource: "rules", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let set = try? JSONDecoder.rules.decode(RuleSet.self, from: data) else {
@@ -25,8 +31,10 @@ final class RuleStore {
     private let provider: RuleProviding
     private(set) var ruleSet: RuleSet?
 
-    init(provider: RuleProviding) {
+    /// `preloaded` lets the app start with rules already in hand (no loading screen).
+    init(provider: RuleProviding, preloaded: RuleSet? = nil) {
         self.provider = provider
+        self.ruleSet = preloaded
     }
 
     func load() async {

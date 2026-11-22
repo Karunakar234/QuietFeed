@@ -4,7 +4,7 @@ import SwiftUI
 
 @main
 struct StillfeedApp: App {
-    @State private var ruleStore = RuleStore(provider: BundledRuleProvider())
+    @State private var ruleStore = RuleStore(provider: BundledRuleProvider(), preloaded: BundledRuleProvider.loadNow())
     @State private var insights = WeeklyInsightsStore()
 
     init() {
