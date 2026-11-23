@@ -208,6 +208,7 @@ struct FocusModeHero: View {
                         Circle().stroke(.white.opacity(0.55), lineWidth: 1)
                     }
                     .shadow(color: Neon.teal.opacity(0.65), radius: 16)
+                    .accessibilityHidden(true)
             }
             .padding(Space.s20)
             .frame(maxWidth: .infinity, minHeight: 138, alignment: .leading)
@@ -229,9 +230,9 @@ struct FocusModeHero: View {
                     )
             }
             .shadow(color: Neon.teal.opacity(0.18), radius: 18, y: 8)
-            .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus Mode")
         .accessibilityHint("Opens focus session controls")
     }
@@ -346,6 +347,7 @@ struct ServiceCard: View {
                     .shadow(color: art.iconColor.opacity(0.6), radius: 8)
                     .frame(height: 36)
                     .padding(.bottom, Space.s4)
+                    .accessibilityHidden(true)
                 Text(platform.name)
                     .font(TypeRole.footnote.weight(.semibold))
                     .foregroundStyle(.white)
@@ -386,6 +388,7 @@ struct ServiceCard: View {
                       systemImage: isFavorite ? "star.slash" : "star")
             }
         }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(platform.name)
         .accessibilityValue(isFavorite ? "Favorite" : "")
         .accessibilityHint("Opens \(platform.name)")
@@ -418,6 +421,8 @@ struct RecentChip: View {
             .glassEffect(.regular.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(platform.name)
         .accessibilityHint("Opens \(platform.name)")
     }
 }
@@ -482,6 +487,7 @@ struct RecommendationCard: View {
                         .foregroundStyle(.white)
                         .frame(width: 30, height: 30)
                         .background(.white.opacity(0.15), in: Circle())
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(pick.title)
                             .font(TypeRole.footnote.weight(.semibold))
@@ -500,6 +506,7 @@ struct RecommendationCard: View {
             .glassEffect(.regular.interactive(), in: shape)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(pick.title), on \(platformName)")
         .accessibilityHint("Searches \(platformName)")
     }
@@ -513,7 +520,7 @@ struct InsightsCard: View {
     /// Monday-first one-letter day names in the person's language.
     private var days: [String] {
         let symbols = Calendar.current.veryShortWeekdaySymbols
-        return Array(symbols[1...] + symbols[..<1])
+        return Array(symbols.dropFirst() + symbols.prefix(1))
     }
 
     var body: some View {

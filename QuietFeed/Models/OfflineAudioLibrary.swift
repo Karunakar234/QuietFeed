@@ -18,6 +18,7 @@ final class OfflineAudioLibrary {
     private(set) var lastError: String?
 
     @ObservationIgnored private var player: AVAudioPlayer?
+    @ObservationIgnored private var playerDelegate: AudioPlayerDelegateBridge?
     private let folderURL: URL
     private let manifestURL: URL
 
@@ -64,6 +65,9 @@ final class OfflineAudioLibrary {
                 player.pause()
                 isPlaying = false
             } else {
+                #if canImport(AVFAudio) && !os(macOS)
+                try? AVAudioSession.sharedInstance().setActive(true)
+                #endif
                 player.play()
                 isPlaying = true
             }
@@ -71,16 +75,26 @@ final class OfflineAudioLibrary {
         }
 
         do {
+            #if canImport(AVFAudio) && !os(macOS)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            #endif
             let newPlayer = try AVAudioPlayer(contentsOf: folderURL.appendingPathComponent(track.fileName))
+            let bridge = AudioPlayerDelegateBridge { [weak self] in
+                self?.didFinishPlaying()
+            }
+            newPlayer.delegate = bridge
             newPlayer.prepareToPlay()
             newPlayer.play()
             player = newPlayer
+            playerDelegate = bridge
             playingTrackID = track.id
             isPlaying = true
             lastError = nil
         } catch {
             playingTrackID = nil
             isPlaying = false
+            player = nil
+            playerDelegate = nil
             lastError = "This audio format could not be played."
         }
     }
@@ -89,6 +103,7 @@ final class OfflineAudioLibrary {
         if playingTrackID == track.id {
             player?.stop()
             player = nil
+            playerDelegate = nil
             playingTrackID = nil
             isPlaying = false
         }
@@ -100,10 +115,18 @@ final class OfflineAudioLibrary {
     func reset() {
         player?.stop()
         player = nil
+        playerDelegate = nil
         playingTrackID = nil
         isPlaying = false
         try? FileManager.default.removeItem(at: folderURL)
         tracks = []
+    }
+
+    private func didFinishPlaying() {
+        isPlaying = false
+        playingTrackID = nil
+        player = nil
+        playerDelegate = nil
     }
 
     private func persist() {
@@ -112,6 +135,20 @@ final class OfflineAudioLibrary {
             try JSONEncoder().encode(tracks).write(to: manifestURL, options: .atomic)
         } catch {
             assertionFailure("Unable to persist offline audio library: \(error)")
+        }
+    }
+}
+
+private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+    private let onFinish: @MainActor () -> Void
+
+    init(onFinish: @escaping @MainActor () -> Void) {
+        self.onFinish = onFinish
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            onFinish()
         }
     }
 }

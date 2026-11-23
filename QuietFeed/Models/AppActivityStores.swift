@@ -41,11 +41,12 @@ final class FocusSessionStore {
     }
 
     func start(minutes: Int) async {
-        let end = Date.now.addingTimeInterval(TimeInterval(max(1, minutes) * 60))
+        let duration = TimeInterval(max(1, minutes) * 60)
+        let end = Date.now.addingTimeInterval(duration)
         endDate = end
         defaults.set(end, forKey: Key.endDate)
         if completionNotifications {
-            await scheduleCompletionNotification(after: TimeInterval(max(1, minutes) * 60))
+            await scheduleCompletionNotification(after: duration)
         }
     }
 
@@ -60,12 +61,18 @@ final class FocusSessionStore {
     func setNotificationsEnabled(_ enabled: Bool) async -> Bool {
         guard enabled else {
             completionNotifications = false
+            #if canImport(UserNotifications)
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["quietfeed.focus.complete"])
+            #endif
             return true
         }
         #if canImport(UserNotifications)
         do {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
             completionNotifications = granted
+            if granted, isActive, let remaining = endDate?.timeIntervalSinceNow, remaining > 0 {
+                await scheduleCompletionNotification(after: remaining)
+            }
             return granted
         } catch {
             completionNotifications = false
@@ -137,10 +144,19 @@ final class UsageStore {
         persist()
     }
 
-    func duration(platformID: String? = nil, since start: Date) -> TimeInterval {
-        records.lazy
+    func duration(platformID: String? = nil, since start: Date, now: Date = .now) -> TimeInterval {
+        var total = records.lazy
             .filter { $0.endedAt >= start && (platformID == nil || $0.platformID == platformID) }
             .reduce(0) { $0 + $1.duration }
+        if let activeID = activePlatformID, let activeStart, now > activeStart {
+            if platformID == nil || activeID == platformID {
+                let effectiveStart = max(activeStart, start)
+                if now > effectiveStart {
+                    total += now.timeIntervalSince(effectiveStart)
+                }
+            }
+        }
+        return total
     }
 
     func exportCSV(platformName: (String) -> String) -> String {

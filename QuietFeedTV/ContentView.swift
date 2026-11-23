@@ -77,6 +77,7 @@ struct ContentView: View {
                 .foregroundStyle(.mint)
                 .frame(width: 88, height: 88)
                 .glassEffect(.regular, in: .rect(cornerRadius: 24))
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("QuietFeed")
@@ -102,9 +103,11 @@ struct ContentView: View {
                     Image(systemName: platform.symbol)
                         .font(.system(size: 38, weight: .semibold))
                         .foregroundStyle(platform.tint)
+                        .accessibilityHidden(true)
                     Spacer()
                     Image(systemName: "arrow.up.forward.app.fill")
                         .foregroundStyle(.white.opacity(0.7))
+                        .accessibilityHidden(true)
                 }
                 Spacer(minLength: 20)
                 Text(platform.name)
@@ -121,6 +124,8 @@ struct ContentView: View {
             .glassEffect(.regular.tint(platform.tint.opacity(0.16)).interactive(), in: .rect(cornerRadius: 28))
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(platform.name), \(platform.detail)")
         .accessibilityHint("Opens the installed \(platform.name) app")
     }
 }

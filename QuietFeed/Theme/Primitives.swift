@@ -94,10 +94,17 @@ struct PlatformTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: Space.s8) {
                 HStack {
-                    Image(systemName: symbol).font(.title2).foregroundStyle(Theme.color.accent)
+                    Image(systemName: symbol)
+                        .font(.title2)
+                        .foregroundStyle(Theme.color.accent)
+                        .accessibilityHidden(true)
                     Spacer()
                     if state == .locked { ProBadge() }
-                    if isSelected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.color.accent) }
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.color.accent)
+                            .accessibilityHidden(true)
+                    }
                 }
                 Spacer(minLength: Space.s12)
                 Text(name)
@@ -178,7 +185,9 @@ struct PlanCard: View {
         Button(action: action) {
             HStack(spacing: Space.s12) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .font(.title3).foregroundStyle(isSelected ? Theme.color.accent : Theme.color.borderInput)
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Theme.color.accent : Theme.color.borderInput)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Space.s4) {
                     HStack {
                         Text(title).font(TypeRole.headline)
@@ -321,7 +330,9 @@ struct WebTopBar: View {
             if showingAccount, let accountLabel {
                 Text("· \(accountLabel)").font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
             }
-            Image(systemName: "chevron.down").font(.caption2)
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .accessibilityHidden(true)
         }
         .lineLimit(1)
     }
@@ -348,35 +359,35 @@ struct CountdownView: View {
 
     var body: some View {
         VStack(spacing: Space.s4) {
-            Text(label).font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
-            Text(timerInterval: Date.now...max(endsAt, Date.now), countsDown: true)
-                .font(TypeRole.stat).foregroundStyle(Theme.color.text)
-                .contentTransition(.numericText(countsDown: true))
+            Text(label.uppercased()).font(TypeRole.caption).foregroundStyle(Theme.color.textMuted)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let remaining = max(0, Int(endsAt.timeIntervalSince(context.date)))
+                Text(String(format: "%02d:%02d", remaining / 60, remaining % 60))
+                    .font(TypeRole.stat)
+                    .foregroundStyle(remaining < 60 ? Theme.color.danger : Theme.color.accent)
+                    .monospacedDigit()
+            }
         }
+        .padding(Space.s16)
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label), time remaining")
     }
 }
 
-// MARK: - Stat card (S06, S14)
+// MARK: - Stat card (S10)
 
 struct StatCard: View {
     let title: String
-    let value: String?          // nil = no data yet
+    let value: String?
     var delta: String? = nil
-    var deltaIsGood = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             Text(title).font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
-            if let value {
-                Text(value).font(TypeRole.stat).foregroundStyle(Theme.color.text)
-                if let delta {
-                    Text(delta).font(TypeRole.caption)
-                        .foregroundStyle(deltaIsGood ? Theme.color.success : Theme.color.danger)
-                }
-            } else {
-                Text("No data yet").font(TypeRole.body).foregroundStyle(Theme.color.textMuted)
+            Text(value ?? "—").font(TypeRole.stat).foregroundStyle(Theme.color.text)
+            if let delta {
+                Text(delta).font(TypeRole.caption).foregroundStyle(Theme.color.accent)
             }
         }
         .padding(Space.s16)
@@ -386,9 +397,9 @@ struct StatCard: View {
     }
 }
 
-// MARK: - Banner / toast
+// MARK: - Banner (S15)
 
-enum BannerKind { case info, success, warning, error }
+enum BannerKind { case info, warning, success, error }
 
 struct Banner: View {
     let kind: BannerKind
@@ -399,11 +410,12 @@ struct Banner: View {
     private var tint: Color {
         switch kind {
         case .info: Theme.color.accent
-        case .success: Theme.color.success
         case .warning: Theme.color.warning
+        case .success: Theme.color.success
         case .error: Theme.color.danger
         }
     }
+
     private var symbol: String {
         switch kind {
         case .info: "info.circle.fill"
@@ -415,7 +427,9 @@ struct Banner: View {
 
     var body: some View {
         HStack(spacing: Space.s8) {
-            Image(systemName: symbol).foregroundStyle(tint)
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
             Text(text).font(TypeRole.footnote).foregroundStyle(Theme.color.text)
             Spacer(minLength: 0)
             if let actionTitle {

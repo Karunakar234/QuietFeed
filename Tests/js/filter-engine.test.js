@@ -85,16 +85,49 @@ test('Updating rules does not recount an already-hidden post', async () => {
   page.close();
 });
 
-test('legacy ad action cannot change playback', async () => {
+test('YouTube: ad skip advances and mutes playback when enabled', async () => {
   const page = load({
     url: 'https://m.youtube.com/watch?v=test',
     html: '<div id="movie_player" class="ad-showing"><video></video></div>',
-    rules: [{ key: 'legacy', action: 'skip_ads', selectors: [], url_patterns: [], text_matches: [] }]
+    rules: defaultRules('youtube', { skip_ads: true })
+  });
+  const media = page.document.querySelector('video');
+  Object.defineProperty(media, 'duration', { configurable: true, value: 30 });
+  await tick(250);
+  assert.ok(media.currentTime > 29, `currentTime should be advanced: ${media.currentTime}`);
+  assert.equal(media.muted, true);
+  assert.equal(media.playbackRate, 16);
+  page.close();
+});
+
+test('YouTube: ad skip does not alter playback when disabled', async () => {
+  const page = load({
+    url: 'https://m.youtube.com/watch?v=test',
+    html: '<div id="movie_player" class="ad-showing"><video></video></div>',
+    rules: defaultRules('youtube', { skip_ads: false })
   });
   const media = page.document.querySelector('video');
   Object.defineProperty(media, 'duration', { configurable: true, value: 30 });
   await tick(250);
   assert.equal(media.currentTime, 0);
+  assert.equal(media.muted, false);
+  assert.equal(media.playbackRate, 1);
+  page.close();
+});
+
+test('YouTube: disabling ad skip dynamically restores playback', async () => {
+  const page = load({
+    url: 'https://m.youtube.com/watch?v=test',
+    html: '<div id="movie_player" class="ad-showing"><video></video></div>',
+    rules: defaultRules('youtube', { skip_ads: true })
+  });
+  const media = page.document.querySelector('video');
+  Object.defineProperty(media, 'duration', { configurable: true, value: 30 });
+  await tick(250);
+  assert.equal(media.muted, true);
+  // User toggles skip_ads off in filter module
+  page.window.__stillfeed.update(defaultRules('youtube', { skip_ads: false }));
+  await tick(50);
   assert.equal(media.muted, false);
   assert.equal(media.playbackRate, 1);
   page.close();

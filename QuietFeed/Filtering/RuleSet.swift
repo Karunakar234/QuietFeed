@@ -19,6 +19,10 @@ struct FilterRule: Codable, Hashable {
         static let redirect = "redirect"
         static let blockNavigation = "block_navigation"
         static let disableScroll = "disable_scroll"
+        static let skipAds = "skip_ads"
+        static let autoHideTop = "autohide_top"
+        static let autoHideBottom = "autohide_bottom"
+        static let click = "click"
     }
 
     let platformId: String
@@ -44,12 +48,12 @@ struct RuleSet: Codable {
 
 /// What the Filters screen shows: one switch per rule key (a key can cover several rules).
 struct RuleToggle: Identifiable, Hashable {
+    var id: String { key }
     let key: String
     let title: String
     let detail: String?
     let isPro: Bool
     let defaultOn: Bool
-    var id: String { key }
 }
 
 extension JSONDecoder {

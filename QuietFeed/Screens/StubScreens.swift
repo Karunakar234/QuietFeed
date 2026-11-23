@@ -26,8 +26,9 @@ struct BlockingScreen: View {
                     )
 
                     HStack {
-                        Button("25 minutes") { Task { await focus.start(minutes: 25) } }
-                        Button("50 minutes") { Task { await focus.start(minutes: 50) } }
+                        Button("15 min") { Task { await focus.start(minutes: 15) } }
+                        Button("25 min") { Task { await focus.start(minutes: 25) } }
+                        Button("50 min") { Task { await focus.start(minutes: 50) } }
                     }
                     .buttonStyle(.app(.secondary, .md))
 
@@ -98,12 +99,20 @@ struct StatsScreen: View {
                 }
 
                 GlassSectionCard("QuietFeed usage", symbol: "hourglass") {
-                    Text(Duration.seconds(usage.duration(since: weekStart)), format: .time(pattern: .hourMinute))
+                    let totalUsage = usage.duration(since: weekStart)
+                    Text(Duration.seconds(totalUsage), format: .time(pattern: .hourMinute))
                         .font(TypeRole.stat)
                         .foregroundStyle(Neon.teal)
                     Text("time in opened platforms this week")
                         .font(TypeRole.footnote)
                         .foregroundStyle(.white.opacity(0.65))
+
+                    if totalUsage == 0 && usage.records.isEmpty {
+                        Text("No platform usage recorded yet this week.")
+                            .font(TypeRole.footnote)
+                            .foregroundStyle(.white.opacity(0.55))
+                            .padding(.top, Space.s4)
+                    }
 
                     ForEach(ruleStore.platforms) { platform in
                         let duration = usage.duration(platformID: platform.id, since: weekStart)
@@ -178,6 +187,7 @@ struct AccountsScreen: View {
                 Label(platform.name, systemImage: platform.symbol)
                     .font(TypeRole.headline)
                     .foregroundStyle(.white)
+                    .accessibilityAddTraits(.isHeader)
 
                 ForEach(platformAccounts) { account in
                     Label(
@@ -186,6 +196,8 @@ struct AccountsScreen: View {
                     )
                     .foregroundStyle(account.isActive ? Neon.teal : .white.opacity(0.7))
                     .padding(.vertical, Space.s8)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(account.label), \(account.isActive ? "Active" : "Inactive")")
                 }
 
                 Divider().overlay(.white.opacity(0.12))
@@ -351,6 +363,8 @@ private struct SettingsOfflineAudioCard: View {
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.lg))
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Offline audio")
         .accessibilityHint("Opens your offline audio library")
     }
 }
@@ -374,17 +388,19 @@ private struct OfflineAudioScreen: View {
                     }
                     ForEach(library.tracks) { track in
                         HStack {
+                            let isCurrent = library.playingTrackID == track.id && library.isPlaying
                             Button {
                                 library.togglePlayback(of: track)
                             } label: {
                                 Label(
                                     track.title,
-                                    systemImage: library.playingTrackID == track.id && library.isPlaying
-                                        ? "pause.circle.fill" : "play.circle.fill"
+                                    systemImage: isCurrent ? "pause.circle.fill" : "play.circle.fill"
                                 )
                             }
+                            .accessibilityLabel("\(isCurrent ? "Pause" : "Play") \(track.title)")
                             Spacer()
                             Button("Delete", role: .destructive) { library.remove(track) }
+                                .accessibilityLabel("Delete \(track.title)")
                         }
                     }
                 }

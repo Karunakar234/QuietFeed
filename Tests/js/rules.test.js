@@ -2,13 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { RULESET } = require('./harness');
 
-const ACTIONS = new Set(['hide', 'remove', 'redirect', 'block_navigation', 'disable_scroll', 'autohide_top', 'autohide_bottom', 'click']);
+const ACTIONS = new Set(['hide', 'remove', 'redirect', 'block_navigation', 'disable_scroll', 'skip_ads', 'autohide_top', 'autohide_bottom', 'click']);
 
-test('rules contain no ad-removal behavior', () => {
-  for (const rule of RULESET.rules) {
-    assert.notEqual(rule.action, 'skip_ads');
-    assert.notEqual(rule.key, 'hide_ads');
-    assert.notEqual(rule.key, 'hide_sponsored');
+test('skip_ads rules are configured with valid actions and toggles', () => {
+  const skipRules = RULESET.rules.filter(rule => rule.key === 'skip_ads');
+  assert.ok(skipRules.length > 0, 'skip_ads rules should exist');
+  for (const rule of skipRules) {
+    assert.ok(rule.action === 'skip_ads' || rule.action === 'hide');
+    assert.equal(rule.title, 'Skip ads');
+    assert.equal(rule.default_on, true);
   }
 });
 

@@ -95,6 +95,7 @@ private struct PickPlatformsScreen: View {
                             .foregroundStyle(Neon.teal)
                             .frame(width: 52, height: 52)
                             .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
+                            .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: Space.s4) {
                             Text("Choose your platforms")
@@ -154,4 +155,3 @@ private struct PickPlatformsScreen: View {
         .environment(RuleStore(provider: BundledRuleProvider()))
         .modelContainer(for: [PlatformSetting.self, Account.self], inMemory: true)
 }
-

@@ -102,3 +102,19 @@ The first pass ran with no Xcode, so this pass compiled the app, ran it on a rea
 5. Flip a filter switch and check that Stats doesn't jump.
 6. Turn on Reduce Motion and open/minimize a platform.
 7. Use "Delete my data".
+
+## Pass 3 — Hardening & Remediation (2026-11-22)
+
+This pass addressed the open hardening items, completed the store implementations and automated tests, and audited accessibility and security settings:
+
+| # | Focus | Root cause / Gap | Fix / Resolution | Verification |
+|---|---|---|---|---|
+| R1 | **Security Settings** | Enhanced Security was disabled on the main app targets pending separate verification. | Enabled `ENABLE_ENHANCED_SECURITY = YES` on both `QuietFeed` and `QuietFeedTV`. Updated `xcode-security-settings-plan.md`. | Built with 0 errors, 0 warnings; all test plans pass. |
+| R2 | **Focus & Blocking** | Focus session notifications didn't auto-schedule if enabled mid-session or cancel if toggled off; preset options were limited. | `FocusSessionStore` now automatically schedules notifications if enabled during an active session and cancels pending requests if disabled or stopped. Added 15/25/50 min presets. | 4 new unit tests in `FocusSessionStoreTests`. |
+| R3 | **Usage Analytics & Export** | Stats displayed only previously completed sessions; live open platform duration was omitted until exit. | `UsageStore.duration` now includes live time for currently open platforms. CSV export verified with RFC 4180 quote escaping. Added graceful empty state in `StatsScreen`. | 5 new unit tests in `UsageStoreTests`. |
+| R4 | **Offline Audio** | Playing track state (`isPlaying`, `playingTrackID`) remained stuck when an imported audio track finished playing naturally. | Added `AudioPlayerDelegateBridge` conforming to `AVAudioPlayerDelegate` to clear playback state on finish. Activated AVAudioSession on playback. | 2 new unit tests in `OfflineAudioLibraryTests`. |
+| R5 | **Accessibility** | VoiceOver exposed generic SF symbol names ("play.fill", "checklist", "star.fill", "sparkles.tv.fill", etc.) on interactive cards and buttons. | Added `.accessibilityHidden(true)` to decorative icons and `.accessibilityElement(children: .ignore)` with explicit `accessibilityLabel`, `accessibilityValue`, and `accessibilityHint` across `HomeCards`, `StubScreens`, `Primitives`, `OnboardingFlow`, and `QuietFeedTV`. | Code review & preview inspection. |
+| R6 | **DRM & Provider Boundaries** | Clarification on offline streaming from proprietary services. | Documented boundary: third-party services (Spotify, YouTube Music, Netflix, Prime Video) use FairPlay/Widevine DRM and prohibit unauthorized downloading. QuietFeed respects platform DRM boundaries and provides a native offline player for personal imported audio files. | UI copy in `OfflineAudioScreen` & `SettingsOfflineAudioCard`. |
+| R7 | **Memory & Allocation Cycle Audit** | Verification of retain cycles in web view message handlers and background delegates. | Verified `WeakMessageHandler` and `AudioPlayerDelegateBridge` use weak references. `WebModel.shutdown()` invalidates all KVO observers and removes script message handlers. | Retain cycle audit & test suite pass. |
+
+**Test results:** Swift Testing **40/40 passed** · JS tests **19/19 passed** (59/59 total automated tests).
