@@ -52,7 +52,8 @@ enum FocusSurfaces {
 
 #if os(iOS)
 /// The Focus Live Activity. Mirrored in the widget extension; the two must match.
-struct FocusActivityAttributes: ActivityAttributes {
+/// Plain data, so not tied to the main actor (the app target's default isolation).
+nonisolated struct FocusActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var endDate: Date
     }

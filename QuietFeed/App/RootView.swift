@@ -9,9 +9,14 @@ struct RootView: View {
     @Environment(\.modelContext) private var context
     @Environment(WeeklyInsightsStore.self) private var insights
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AppLock.self) private var appLock
+    @Environment(IntentRouter.self) private var intentRouter
+    @Environment(FocusSessionStore.self) private var focus
     @Query private var settings: [PlatformSetting]
     @AppStorage("didOnboard") private var didOnboard = false
+    @AppStorage("appearanceMode") private var appearanceMode = "system"
     @State private var session = PlayerSession()
+    @State private var showFocusBlocked = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,7 +40,7 @@ struct RootView: View {
                         ProgressView()
                         Text("Preparing your quieter feed")
                             .font(TypeRole.footnote)
-                            .foregroundStyle(.white.opacity(0.72))
+                            .foregroundStyle(Theme.color.textMuted)
                     }
                     .padding(Space.s24)
                     .glassEffect(.regular, in: .rect(cornerRadius: Radius.lg))
@@ -60,14 +65,82 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.color.bg)
+        .preferredColorScheme(preferredColorScheme)
+        // With the lock on, the cover also hides the screen whenever the app isn't active,
+        // so the app switcher's snapshot doesn't show the open feed.
+        .overlay {
+            if appLock.isLocked || (appLock.isEnabled && scenePhase != .active) {
+                LockCover()
+            }
+        }
         .task {
             await ruleStore.load()
             seedSettings()
+            publishLauncher()
+            takeWidgetRequest()
+            openRequestedPlatform()
+            await appLock.promptIfNeeded()
+        }
+        .onChange(of: intentRouter.pendingPlatformID) { _, _ in openRequestedPlatform() }
+        .onChange(of: didOnboard) { _, _ in openRequestedPlatform() }
+        .onChange(of: launcherSignature) { _, _ in publishLauncher() }
+        // quietfeed://open/<platform> from a widget; any other QuietFeed link just opens the app.
+        .onOpenURL { url in
+            if let id = LauncherSnapshot.platformID(from: url) { intentRouter.pendingPlatformID = id }
+        }
+        .alert("Focus session active", isPresented: $showFocusBlocked) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Platform opening is blocked inside QuietFeed until the focus session ends.")
         }
         .onChange(of: scenePhase) { _, phase in
             // Save this week's batched counts before the system may suspend the app.
             if phase != .active { insights.flush() }
+            if phase == .background { appLock.lock() }
+            if phase == .active {
+                takeWidgetRequest()
+                Task { await appLock.promptIfNeeded() }
+            }
         }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch appearanceMode {
+        case "light": .light
+        case "dark": .dark
+        default: nil
+        }
+    }
+
+    /// Opens the platform an "Open Platform" shortcut asked for, once the app is past onboarding.
+    private func openRequestedPlatform() {
+        guard let id = intentRouter.pendingPlatformID, ruleStore.isLoaded, didOnboard else { return }
+        intentRouter.pendingPlatformID = nil
+        guard let platform = ruleStore.platform(id: id) else { return }
+        // Widgets and links skip Home, so the Focus block is checked here as well.
+        guard !(focus.isActive && focus.blocksPlatforms) else {
+            showFocusBlocked = true
+            return
+        }
+        settings.first { $0.platformID == id }?.lastOpenedAt = .now
+        withAnimation(Motion.gentle) { session.open(platform) }
+    }
+
+    /// A widget icon tapped while QuietFeed wasn't running hands its platform over through the
+    /// App Group (the widget's intent may run in the extension).
+    private func takeWidgetRequest() {
+        if let id = LauncherSnapshot.takePendingPlatformID() { intentRouter.pendingPlatformID = id }
+    }
+
+    /// Changes whenever anything the launcher widgets show changes.
+    private var launcherSignature: [String] {
+        settings.map {
+            "\($0.platformID)|\($0.isEnabled)|\($0.isFavorite)|\($0.sortOrder)|\($0.lastOpenedAt?.timeIntervalSince1970 ?? 0)"
+        }
+    }
+
+    private func publishLauncher() {
+        LauncherSnapshot.publish(settings: settings, platforms: ruleStore.platforms)
     }
 
     /// Makes sure every platform has a settings row, so screens never meet a missing one.
@@ -76,6 +149,41 @@ struct RootView: View {
         for (index, platform) in ruleStore.platforms.enumerated() where !existing.contains(platform.id) {
             context.insert(PlatformSetting(platformID: platform.id, sortOrder: index))
         }
+    }
+}
+
+/// Covers everything while QuietFeed is locked. Audio and Picture in Picture keep playing.
+private struct LockCover: View {
+    @Environment(AppLock.self) private var appLock
+
+    var body: some View {
+        VStack(spacing: Space.s16) {
+            Image(systemName: "lock.fill")
+                .font(.largeTitle)
+                .foregroundStyle(Neon.glow)
+                .accessibilityHidden(true)
+            Text("QuietFeed is locked")
+                .font(TypeRole.title)
+                .foregroundStyle(Theme.color.text)
+                .accessibilityAddTraits(.isHeader)
+            if appLock.isLocked {
+                Button("Unlock") { Task { await appLock.unlock() } }
+                    .buttonStyle(.app(.primary, .md))
+                    .disabled(appLock.isAuthenticating)
+                if appLock.lastError == .unavailable {
+                    Text("Set a device passcode in Settings to unlock QuietFeed.")
+                        .font(TypeRole.footnote)
+                        .foregroundStyle(Theme.color.textMuted)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .padding(Layout.screenPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.color.bg.ignoresSafeArea())
+        // Nothing behind the cover is reachable by touch or VoiceOver.
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(.isModal)
     }
 }
 
@@ -126,137 +234,31 @@ private struct MacWindowControlBar: View {
 #endif
 
 enum AppTab: Hashable {
-    case home, blocking, stats, settings
+    case home, filters, blocking, stats, settings
 }
 
 struct MainTabs: View {
     @State private var selection: AppTab = .home
 
     var body: some View {
-        TabContent(selection: selection)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                AuroraTabBar(selection: $selection)
-                    .padding(.horizontal, horizontalDockPadding)
-                    .padding(.vertical, Space.s8)
-                    #if os(macOS)
-                    .padding(.bottom, Space.s8)
-                    #endif
-                    .frame(maxWidth: .infinity)
-                    .background {
-                        LinearGradient(
-                            colors: [.clear, Neon.navy.opacity(0.92)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .ignoresSafeArea()
-                    }
+        TabView(selection: $selection) {
+            Tab("Home", systemImage: "house", value: .home) {
+                HomeScreen()
             }
-    }
-
-    private var horizontalDockPadding: CGFloat {
-        #if os(macOS)
-        Space.s24
-        #else
-        Space.s12
-        #endif
-    }
-}
-
-private struct TabContent: View {
-    let selection: AppTab
-
-    var body: some View {
-        switch selection {
-        case .home:
-            HomeScreen()
-        case .blocking:
-            BlockingScreen()
-        case .stats:
-            StatsScreen()
-        case .settings:
-            SettingsScreen()
-        }
-    }
-}
-
-private struct AuroraTabBar: View {
-    @Binding var selection: AppTab
-
-    private let items: [(AppTab, String, String)] = [
-        (.home, "house.fill", "Home"),
-        (.blocking, "hand.raised.fill", "Blocking"),
-        (.stats, "chart.bar.fill", "Stats"),
-        (.settings, "gearshape.fill", "Settings")
-    ]
-
-    var body: some View {
-        GlassEffectContainer(spacing: Space.s4) {
-            HStack(spacing: Space.s4) {
-                ForEach(items, id: \.0) { tab, symbol, title in
-                    AuroraTabButton(
-                        symbol: symbol,
-                        title: title,
-                        isSelected: selection == tab
-                    ) {
-                        withAnimation(Motion.gentle) {
-                            selection = tab
-                        }
-                    }
-                }
+            Tab("Filters", systemImage: "line.3.horizontal.decrease.circle", value: .filters) {
+                FiltersScreen()
+            }
+            Tab("Blocking", systemImage: "hand.raised", value: .blocking) {
+                BlockingScreen()
+            }
+            Tab("Stats", systemImage: "chart.bar", value: .stats) {
+                StatsScreen()
+            }
+            Tab("Settings", systemImage: "gearshape", value: .settings) {
+                SettingsScreen()
             }
         }
-        .padding(Space.s4)
-        .background(.black.opacity(0.24), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(
-                    LinearGradient(
-                        colors: [Neon.teal.opacity(0.7), .white.opacity(0.14), Neon.violet.opacity(0.55)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    lineWidth: 1
-                )
-        }
-        .shadow(color: Neon.teal.opacity(0.18), radius: 18, y: 6)
-        .shadow(color: .black.opacity(0.38), radius: 24, y: 12)
-        .frame(maxWidth: 620)
-    }
-}
-
-private struct AuroraTabButton: View {
-    let symbol: String
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: symbol)
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .frame(height: 20)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.system(.caption2, design: .rounded, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .foregroundStyle(isSelected ? Neon.teal : .white.opacity(0.78))
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .padding(.horizontal, Space.s4)
-            .contentShape(Capsule())
-            .glassEffect(
-                isSelected
-                    ? .regular.tint(Neon.teal.opacity(0.28)).interactive()
-                    : .regular.interactive(),
-                in: .capsule
-            )
-            .shadow(color: isSelected ? Neon.teal.opacity(0.45) : .clear, radius: 8)
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .tint(Theme.color.accent)
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }

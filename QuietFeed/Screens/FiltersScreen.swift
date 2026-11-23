@@ -13,7 +13,7 @@ struct FiltersScreen: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Home") {
+                ThemedSection("Home") {
                     Toggle("Show Focus Mode card", isOn: $showFocusModeCard)
                 }
 
@@ -47,7 +47,7 @@ private struct FilterPlatformSection: View {
     }
 
     var body: some View {
-        Section(platformName) {
+        ThemedSection(verbatim: platformName) {
             ForEach(toggles) { toggle in
                 Toggle(
                     isOn: Binding(
@@ -57,9 +57,11 @@ private struct FilterPlatformSection: View {
                 ) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(toggle.title)
-                        Text(toggle.detail)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        if let detail = toggle.detail {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.color.textMuted)
+                        }
                     }
                 }
             }

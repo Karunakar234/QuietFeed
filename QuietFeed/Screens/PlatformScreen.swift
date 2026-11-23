@@ -22,6 +22,7 @@ struct PlatformScreen: View {
     @Environment(PlayerSession.self) private var session
     @Environment(WeeklyInsightsStore.self) private var insights
     @Environment(UsageStore.self) private var usage
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @Query private var settings: [PlatformSetting]
@@ -72,10 +73,9 @@ struct PlatformScreen: View {
         GeometryReader { geo in
             let minimized = session.isMinimized
             let videoFullscreen = model?.isVideoFullscreen ?? false
-            // Hide Header controls QuietFeed's chrome immediately. The site's own bars still
-            // follow their existing scroll behavior from FilterEngine.js.
-            let barHidden = !minimized && (hidesHeader || videoFullscreen)
-            let fullBleed = barHidden || isBrowsingFullScreen
+            // Keep QuietFeed's native browser controls available during normal browsing.
+            // Only true fullscreen video hides app chrome.
+            let barHidden = !minimized && videoFullscreen
             VStack(spacing: 0) {
                 if !minimized && !barHidden {
                     WebTopBar(
@@ -157,16 +157,8 @@ struct PlatformScreen: View {
                         .gesture(swipeDownToMinimize)
                     }
                 }
-                // Full screen, the page sits in a rounded glass-edged frame over the neon backdrop;
-                // while browsing (and in the mini-player) it goes edge to edge instead.
                 .background(Theme.color.bg)
-                .clipShape(RoundedRectangle(cornerRadius: minimized || fullBleed ? 0 : Radius.lg, style: .continuous))
-                .overlay {
-                    if !minimized && !fullBleed { glassEdge(cornerRadius: Radius.lg) }
-                }
-                .padding([.horizontal, .bottom], minimized || fullBleed ? 0 : Space.s8)
             }
-            .animation(Motion.gentle, value: fullBleed)
             .frame(width: minimized ? MiniPlayer.size.width : geo.size.width,
                    height: minimized ? MiniPlayer.size.height : geo.size.height)
             .background(minimized ? Theme.color.bg : .clear)
@@ -180,9 +172,9 @@ struct PlatformScreen: View {
                       : CGPoint(x: geo.size.width / 2, y: geo.size.height / 2))
             .gesture(miniDragGesture(in: geo.size), including: minimized ? .all : .none)
         }
-        // While browsing, the page runs to the bottom edge behind the home indicator, as in Safari.
-        // The top stays clear of the status bar so the time and battery stay readable.
-        .ignoresSafeArea(.container, edges: isBrowsingFullScreen ? .bottom : [])
+        // Every provider uses the same edge-to-edge browser viewport at the bottom.
+        // The native top bar still keeps content clear of the status area.
+        .ignoresSafeArea(.container, edges: session.isMinimized ? [] : .bottom)
         // Full screen covers the tabs edge to edge; the mini-player leaves them visible and usable.
         .background {
             if session.isMinimized {
@@ -204,6 +196,9 @@ struct PlatformScreen: View {
         }
         .onChange(of: toggles) { _, new in
             model?.updateRules(ruleStore.enabledRules(for: platform.id, toggles: new))
+        }
+        .onChange(of: connectivity.isOnline) { _, online in
+            model?.connectivityChanged(isOnline: online)
         }
         .onChange(of: model?.isVideoFullscreen ?? false) { _, active in
             session.setVideoFullscreen(active)

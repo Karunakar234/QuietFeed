@@ -90,23 +90,23 @@ struct FocusWidgetView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Focus", systemImage: entry.endDate == nil ? "leaf" : "leaf.fill")
                 .font(.headline)
-                .foregroundStyle(FocusWidgetStyle.teal)
+                .foregroundStyle(WidgetTheme.accent)
             Spacer(minLength: 0)
             if let end = entry.endDate {
                 Text(timerInterval: entry.date...end, countsDown: true)
                     .font(.system(.title, design: .rounded, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.text)
                 Text("remaining")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(WidgetTheme.muted)
             } else {
                 Text(entry.isEnabled ? "No session running" : "Focus Mode is off")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.text)
                 if entry.isEnabled {
                     Text("Start one in QuietFeed or with Siri.")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(WidgetTheme.muted)
                 }
             }
         }
@@ -114,21 +114,11 @@ struct FocusWidgetView: View {
     }
 }
 
-/// The app's neon look, on its fixed dark backdrop (white text stays readable on it in both
-/// appearances: 19.6:1 on navy).
-enum FocusWidgetStyle {
-    static let teal = Color(red: 0.36, green: 0.95, blue: 0.85)
-    static let background = LinearGradient(
-        colors: [Color(red: 0.03, green: 0.04, blue: 0.12), Color(red: 0.06, green: 0.03, blue: 0.17)],
-        startPoint: .topLeading, endPoint: .bottomTrailing
-    )
-}
-
 struct FocusWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: FocusShared.widgetKind, provider: FocusProvider()) { entry in
             FocusWidgetView(entry: entry)
-                .containerBackground(for: .widget) { FocusWidgetStyle.background }
+                .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("Focus")
         .description("Time left in your QuietFeed focus session.")

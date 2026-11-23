@@ -40,6 +40,14 @@ struct HomeScreen: View {
             .compactMap { ruleStore.platform(id: $0.platformID) }
     }
 
+    /// The platform that was still open when QuietFeed last quit or was stopped by the system.
+    /// Offered, not reopened automatically, so a page that crashed the app can't do it again.
+    private var platformToResume: Platform? {
+        guard session.platform == nil, let id = session.recoveryPlatformID,
+              enabled.contains(where: { $0.id == id }) else { return nil }
+        return ruleStore.platform(id: id)
+    }
+
     private func setting(for platform: Platform) -> PlatformSetting? {
         settings.first { $0.platformID == platform.id }
     }
@@ -69,15 +77,22 @@ struct HomeScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s24) {
-                    header
-                    searchRow
-                    if showFocusModeCard {
+                    if showFocusModeCard && focus.isEnabled {
                         FocusModeHero { showFocusControls = true }
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+                    if search.isEmpty, let platform = platformToResume {
+                        ResumeCard(
+                            platform: platform,
+                            resume: { open(platform) },
+                            dismiss: { withAnimation(Motion.gentle) { session.discardRecovery() } }
+                        )
+                        .transition(.opacity)
                     }
                     if enabled.isEmpty {
                         emptyState
                     } else {
+                        if !search.isEmpty { SearchExtras(search: search) }
                         if search.isEmpty && !recents.isEmpty { recentRow }
                         platformGrid
                         if !shownPicks.isEmpty { recommendations }
@@ -90,14 +105,14 @@ struct HomeScreen: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background { AuroraBackground() }
+            .searchable(
+                text: $search,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search platforms, picks, filters and audio"
+            )
+            .navigationTitle("QuietFeed")
             .task(id: platformToPreload?.id) { await preload(platformToPreload) }
             .animation(Motion.gentle, value: showFocusModeCard)
-            #if os(macOS)
-            .toolbar(.hidden, for: .windowToolbar)
-            #else
-            .quietFeedNavigationChrome()
-            #endif
         }
         .sheet(isPresented: $showFocusControls) {
             FocusQuickStartSheet()
@@ -111,64 +126,12 @@ struct HomeScreen: View {
 
     // MARK: - Sections
 
-    private var header: some View {
-        HStack(spacing: Space.s12) {
-            Image("BrandMark")
-                .resizable()
-                .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .shadow(color: Neon.teal.opacity(0.35), radius: 12)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("QuietFeed")
-                    .font(TypeRole.display)
-                    .foregroundStyle(.white)
-                Text("Your calmer entertainment hub")
-                    .textCase(.uppercase)
-                    .font(TypeRole.caption)
-                    .tracking(2)
-                    .foregroundStyle(Neon.teal)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-        }
-        .padding(.top, Space.s8)
-    }
-
-    private var searchRow: some View {
-        GlassEffectContainer(spacing: Space.s8) {
-            HStack(spacing: Space.s12) {
-                HStack(spacing: Space.s8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.white.opacity(0.7))
-                        .accessibilityHidden(true)
-                    TextField("Search platforms and picks", text: $search)
-                        #if !os(macOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .submitLabel(.search)
-                        .foregroundStyle(.white)
-                    if !search.isEmpty {
-                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .foregroundStyle(.white.opacity(0.6))
-                            .accessibilityLabel("Clear search")
-                    }
-                }
-                .padding(.horizontal, Space.s16)
-                .frame(minHeight: 50)
-                .glassEffect(.regular, in: .capsule)
-
-            }
-        }
-    }
-
     @ViewBuilder
     private var platformGrid: some View {
         if shownPlatforms.isEmpty {
             Text("No platforms match “\(search)”.")
                 .font(TypeRole.body)
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(Theme.color.textMuted)
         } else {
             GlassEffectContainer(spacing: Space.s8) {
                 LazyVGrid(columns: gridColumns, spacing: Space.s12) {
@@ -193,10 +156,10 @@ struct HomeScreen: View {
             Label {
                 Text("Jump back in")
             } icon: {
-                Image(systemName: "clock.arrow.circlepath").foregroundStyle(Neon.teal)
+                Image(systemName: "clock.arrow.circlepath").foregroundStyle(Neon.glow)
             }
             .font(TypeRole.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.color.text)
             .accessibilityAddTraits(.isHeader)
 
             ScrollView(.horizontal) {
@@ -218,10 +181,10 @@ struct HomeScreen: View {
             Label {
                 Text("Recommended for a quieter feed")
             } icon: {
-                Image(systemName: "sparkles").foregroundStyle(Neon.teal)
+                Image(systemName: "sparkles").foregroundStyle(Neon.glow)
             }
             .font(TypeRole.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.color.text)
             .accessibilityAddTraits(.isHeader)
 
             ScrollView(.horizontal) {
@@ -288,6 +251,27 @@ struct HomeScreen: View {
     }
 }
 
+/// "Pick up where you left off": shown after a relaunch when a platform was open at the time.
+private struct ResumeCard: View {
+    let platform: Platform
+    let resume: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        GlassSectionCard("Pick up where you left off", symbol: "arrow.uturn.forward.circle") {
+            Text("\(platform.name) was open when QuietFeed last closed.")
+                .font(TypeRole.footnote)
+                .foregroundStyle(Theme.color.textMuted)
+            HStack(spacing: Space.s8) {
+                Button("Resume \(platform.name)", action: resume)
+                    .buttonStyle(.app(.primary, .md))
+                Button("Not now", action: dismiss)
+                    .buttonStyle(.app(.ghost, .md))
+            }
+        }
+    }
+}
+
 private struct FocusQuickStartSheet: View {
     @Environment(FocusSessionStore.self) private var focus
     @Environment(\.dismiss) private var dismiss
@@ -299,7 +283,7 @@ private struct FocusQuickStartSheet: View {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Duration.seconds(focus.remaining(at: context.date)), format: .time(pattern: .minuteSecond))
                             .font(TypeRole.stat)
-                            .foregroundStyle(Neon.teal)
+                            .foregroundStyle(Neon.glow)
                             .accessibilityLabel("Focus time remaining")
                             .accessibilityAddTraits(.updatesFrequently)
                     }

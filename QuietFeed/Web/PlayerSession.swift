@@ -6,15 +6,33 @@ import Observation
 @MainActor
 @Observable
 final class PlayerSession {
+    private enum RecoveryKey {
+        static let platformID = "recoverablePlatformID"
+        static let savedAt = "recoverablePlatformSavedAt"
+    }
+
     private(set) var platform: Platform?
     /// The page to open instead of the platform's home, such as a recommended search.
     private(set) var startURL: URL?
     private(set) var isMinimized = false
     private(set) var isVideoFullscreen = false
+    private(set) var recoveryPlatformID: String?
+    @ObservationIgnored private let defaults: UserDefaults
 
     /// One platform's home, loaded in the background before it's opened (the one the person
     /// opened last), so opening it shows the page straight away instead of a loading screen.
     @ObservationIgnored private var preloaded: WebModel?
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let savedAt = defaults.object(forKey: RecoveryKey.savedAt) as? Date
+        if let savedAt, Date.now.timeIntervalSince(savedAt) < 24 * 60 * 60 {
+            recoveryPlatformID = defaults.string(forKey: RecoveryKey.platformID)
+        } else {
+            defaults.removeObject(forKey: RecoveryKey.platformID)
+            defaults.removeObject(forKey: RecoveryKey.savedAt)
+        }
+    }
 
     /// Changes whenever a different page is opened, so the screen builds a fresh web view for it.
     var openID: String { "\(platform?.id ?? "")|\(startURL?.absoluteString ?? "")" }
@@ -25,6 +43,14 @@ final class PlayerSession {
     func preload(_ model: WebModel) {
         if preloaded !== model { preloaded?.shutdown() }
         preloaded = model
+    }
+
+    /// Releases the background page if it belongs to `platformID`, so its website data is no
+    /// longer in use (WebKit won't delete data a live page holds).
+    func discardPreloaded(platformID: String) {
+        guard preloaded?.platform.id == platformID else { return }
+        preloaded?.shutdown()
+        preloaded = nil
     }
 
     /// Whether `model` is the page kept in the background, so closing mustn't shut it down.
@@ -49,6 +75,9 @@ final class PlayerSession {
         self.platform = platform
         startURL = url
         isMinimized = false
+        recoveryPlatformID = nil
+        defaults.set(platform.id, forKey: RecoveryKey.platformID)
+        defaults.set(Date.now, forKey: RecoveryKey.savedAt)
         // Only one page in the background at a time: a different platform frees the preloaded one.
         if preloaded?.platform.id != platform.id {
             preloaded?.shutdown()
@@ -75,5 +104,12 @@ final class PlayerSession {
         startURL = nil
         isMinimized = false
         isVideoFullscreen = false
+        discardRecovery()
+    }
+
+    func discardRecovery() {
+        recoveryPlatformID = nil
+        defaults.removeObject(forKey: RecoveryKey.platformID)
+        defaults.removeObject(forKey: RecoveryKey.savedAt)
     }
 }

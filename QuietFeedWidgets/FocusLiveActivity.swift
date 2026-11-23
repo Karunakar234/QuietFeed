@@ -10,13 +10,12 @@ struct FocusLiveActivity: Widget {
         ActivityConfiguration(for: FocusActivityAttributes.self) { context in
             lockScreen(context)
                 .padding()
-                .activityBackgroundTint(Color(red: 0.03, green: 0.04, blue: 0.12))
-                .activitySystemActionForegroundColor(FocusWidgetStyle.teal)
+                .activitySystemActionForegroundColor(WidgetTheme.accent)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Label("Focus", systemImage: "leaf.fill")
-                        .foregroundStyle(FocusWidgetStyle.teal)
+                        .foregroundStyle(WidgetTheme.islandAccent)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     countdown(context)
@@ -28,13 +27,13 @@ struct FocusLiveActivity: Widget {
                         .foregroundStyle(.secondary)
                 }
             } compactLeading: {
-                Image(systemName: "leaf.fill").foregroundStyle(FocusWidgetStyle.teal)
+                Image(systemName: "leaf.fill").foregroundStyle(WidgetTheme.islandAccent)
             } compactTrailing: {
                 countdown(context)
                     .monospacedDigit()
                     .frame(maxWidth: 52)
             } minimal: {
-                Image(systemName: "leaf.fill").foregroundStyle(FocusWidgetStyle.teal)
+                Image(systemName: "leaf.fill").foregroundStyle(WidgetTheme.islandAccent)
             }
         }
     }
@@ -43,21 +42,21 @@ struct FocusLiveActivity: Widget {
         HStack(spacing: 12) {
             Image(systemName: context.isStale ? "checkmark.circle.fill" : "leaf.fill")
                 .font(.title2)
-                .foregroundStyle(FocusWidgetStyle.teal)
+                .foregroundStyle(WidgetTheme.accent)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(context.isStale ? "Focus complete" : "Focus session")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.text)
                 Text("QuietFeed")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(WidgetTheme.muted)
             }
             Spacer()
             if !context.isStale {
                 countdown(context)
                     .font(.system(.title, design: .rounded, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.text)
                     .multilineTextAlignment(.trailing)
             }
         }

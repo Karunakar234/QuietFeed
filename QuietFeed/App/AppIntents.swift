@@ -26,8 +26,6 @@ struct PlatformEntity: AppEntity {
 }
 
 struct PlatformEntityQuery: EntityQuery {
-    @Dependency private var router: IntentRouter
-
     private func allPlatforms() async -> [PlatformEntity] {
         await MainActor.run {
             BundledRuleProvider.loadNow().platforms.map {
@@ -148,3 +146,9 @@ struct QuietFeedShortcuts: AppShortcutsProvider {
         )
     }
 }
+
+#if os(iOS)
+/// Lets "Start Focus Session" begin the Focus Live Activity when Siri or Shortcuts runs it
+/// with QuietFeed in the background.
+extension StartFocusSessionIntent: LiveActivityIntent {}
+#endif

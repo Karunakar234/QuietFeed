@@ -193,3 +193,15 @@ private func makeDefaults() -> (UserDefaults, String) {
         #expect(fullScreen(instagram) == .unavailable)
     }
 }
+
+@Suite struct LauncherLinkTests {
+    @Test func openLinksNameThePlatform() {
+        #expect(LauncherSnapshot.platformID(from: URL(string: "quietfeed://open/youtube")!) == "youtube")
+        #expect(LauncherSnapshot.platformID(from: URL(string: "quietfeed://open/amazon_prime")!) == "amazon_prime")
+    }
+
+    @Test(arguments: ["quietfeed://home", "quietfeed://open", "quietfeed://open/", "https://open/youtube", "other://open/youtube"])
+    func otherLinksOpenNoPlatform(_ link: String) {
+        #expect(LauncherSnapshot.platformID(from: URL(string: link)!) == nil)
+    }
+}

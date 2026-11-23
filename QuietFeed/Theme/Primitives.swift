@@ -240,7 +240,7 @@ struct WebStateOverlay: View {
             EmptyView()
         case .offline:
             EmptyState(symbol: "wifi.slash", title: "You're offline",
-                       message: "Reconnect and try again. Your filters stay on.",
+                       message: "The page reloads by itself when you're back online. Your filters stay on.",
                        actionTitle: "Try again", action: retry)
         case .error(let msg):
             EmptyState(symbol: "exclamationmark.triangle", title: "Page didn't load",
@@ -276,52 +276,52 @@ struct WebTopBar: View {
     /// trailing side. Account and posting live in the name's menu. Each control is its own piece
     /// of Liquid Glass; glass shapes are 36pt, inside full 44pt tap targets.
     var body: some View {
-        GlassEffectContainer(spacing: Space.s4) {
-            HStack(spacing: Space.s4) {
-                if showsBack {
-                    glassIcon("chevron.backward", label: backReturnsToChat ? "Back to chat" : "Back", action: onBack)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+        HStack(spacing: Space.s4) {
+            Button(action: onBack) {
+                Label(backReturnsToChat ? "Back to chat" : "Back", systemImage: "chevron.backward")
+                    .labelStyle(.iconOnly)
+            }
+            .disabled(!showsBack)
+            .opacity(showsBack ? 1 : 0.35)
+
+            Menu {
+                Button(action: onAccount) {
+                    Label("Switch Account", systemImage: "person.crop.circle")
                 }
-                Menu {
-                    Button(action: onAccount) {
-                        Label("Switch Account", systemImage: "person.crop.circle")
+                if let onPost {
+                    Button(action: onPost) {
+                        Label("Post", systemImage: "square.and.pencil")
                     }
-                    if let onPost {
-                        Button(action: onPost) {
-                            Label("Post", systemImage: "square.and.pencil")
-                        }
-                    }
-                } label: {
-                    // Drops the account name before it ever cuts off the platform's name.
-                    ViewThatFits(in: .horizontal) {
-                        titleLabel(showingAccount: true)
-                        titleLabel(showingAccount: false)
-                    }
-                    .padding(.horizontal, Space.s12)
-                    .frame(minHeight: 36)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    .frame(minHeight: Layout.minTap)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(accountLabel.map { "\(title), \($0)" } ?? title)
-                .accessibilityHint("Account and posting options")
-                // The title takes the free space before the spacer does.
-                .layoutPriority(1)
-                Spacer(minLength: 0)
-                glassIcon("arrow.clockwise", label: "Refresh", action: onReload)
-                if let onMinimize {
-                    glassIcon("pip.enter", label: "Shrink to mini player", action: onMinimize)
+            } label: {
+                ViewThatFits(in: .horizontal) {
+                    titleLabel(showingAccount: true)
+                    titleLabel(showingAccount: false)
                 }
-                if let onClose {
-                    glassIcon("xmark", label: "Close \(title)", action: onClose)
-                }
+            }
+            .accessibilityLabel(accountLabel.map { "\(title), \($0)" } ?? title)
+            .accessibilityHint("Account and posting options")
+            .layoutPriority(1)
+
+            Spacer(minLength: 0)
+
+            Button("Refresh", systemImage: "arrow.clockwise", action: onReload)
+                .labelStyle(.iconOnly)
+            if let onMinimize {
+                Button("Shrink to mini player", systemImage: "pip.enter", action: onMinimize)
+                    .labelStyle(.iconOnly)
+            }
+            if let onClose {
+                Button("Close \(title)", systemImage: "xmark", action: onClose)
+                    .labelStyle(.iconOnly)
             }
         }
         .foregroundStyle(Theme.color.text)
-        .padding(.horizontal, Space.s8)
-        .frame(height: Layout.webTopBar + Space.s8)
-        .animation(Motion.gentle, value: showsBack)
+        .buttonStyle(.borderless)
+        .controlSize(.large)
+        .padding(.horizontal, Space.s12)
+        .frame(minHeight: Layout.webTopBar + Space.s8)
+        .background(.bar)
     }
 
     private func titleLabel(showingAccount: Bool) -> some View {
@@ -337,18 +337,6 @@ struct WebTopBar: View {
         .lineLimit(1)
     }
 
-    private func glassIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(TypeRole.body.weight(.semibold))
-                .frame(width: 36, height: 36)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .frame(width: Layout.minTap, height: Layout.minTap)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
 }
 
 // MARK: - Countdown (S11, Live Activity uses the same layout)
@@ -534,3 +522,37 @@ struct DesignGallery: View {
 #Preview("Light") { DesignGallery() }
 #Preview("Dark") { DesignGallery().preferredColorScheme(.dark) }
 #Preview("XXL text") { DesignGallery().dynamicTypeSize(.accessibility2) }
+
+// MARK: - Form sections
+
+/// A Form section whose header and footer use the theme's muted text colour. The system's
+/// section grey is about 3.3:1 on the grouped background in Light mode, below the 4.5:1
+/// WCAG AA asks for; `textMuted` is 5.88:1.
+struct ThemedSection<Content: View>: View {
+    private let header: Text
+    private let footer: Text?
+    private let content: Content
+
+    init(_ title: LocalizedStringKey, footer: LocalizedStringKey? = nil, @ViewBuilder content: () -> Content) {
+        self.header = Text(title)
+        self.footer = footer.map { Text($0) }
+        self.content = content()
+    }
+
+    /// For titles that are data, such as a platform's name.
+    init<S: StringProtocol>(verbatim title: S, @ViewBuilder content: () -> Content) {
+        self.header = Text(title)
+        self.footer = nil
+        self.content = content()
+    }
+
+    var body: some View {
+        Section {
+            content
+        } header: {
+            header.foregroundStyle(Theme.color.textMuted)
+        } footer: {
+            if let footer { footer.foregroundStyle(Theme.color.textMuted) }
+        }
+    }
+}

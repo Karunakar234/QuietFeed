@@ -12,14 +12,16 @@ final class ConnectivityMonitor {
     @ObservationIgnored private let monitor = NWPathMonitor()
 
     init() {
-        monitor.pathUpdateHandler = { [weak self] path in
-            let online = path.status == .satisfied
-            Task { @MainActor in
-                guard let self, self.isOnline != online else { return }
-                self.isOnline = online
+        // Path updates arrive on the monitor's queue; a stream carries them to the main actor.
+        let (updates, continuation) = AsyncStream.makeStream(of: Bool.self, bufferingPolicy: .bufferingNewest(1))
+        monitor.pathUpdateHandler = { path in continuation.yield(path.status == .satisfied) }
+        monitor.start(queue: DispatchQueue(label: "QuietFeed.connectivity", qos: .utility))
+        Task { [weak self] in
+            for await online in updates {
+                guard let self else { return }
+                if self.isOnline != online { self.isOnline = online }
             }
         }
-        monitor.start(queue: DispatchQueue(label: "QuietFeed.connectivity", qos: .utility))
     }
 
     deinit {
@@ -44,14 +46,16 @@ enum LoadFailurePolicy {
     static let maxRetries = 2
 
     static func outcome(domain: String, code: Int, attempt: Int) -> Outcome {
-        if domain == NSURLErrorDomain && code == NSURLErrorCancelled { return .ignore }
+        // Matched on the code alone, as before, whichever domain WebKit reports it in.
+        if code == NSURLErrorCancelled { return .ignore }
         // 102: "frame load interrupted" is what WebKit reports when a load is cancelled on purpose.
         if domain == "WebKitErrorDomain" && code == 102 { return .ignore }
-        guard domain == NSURLErrorDomain else { return .fail }
         switch code {
         case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorDataNotAllowed,
              NSURLErrorInternationalRoamingOff:
             return .offline
+        case _ where domain != NSURLErrorDomain:
+            return .fail
         case NSURLErrorTimedOut, NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost,
              NSURLErrorDNSLookupFailed:
             guard attempt < maxRetries else { return .fail }

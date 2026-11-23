@@ -10,6 +10,9 @@ struct LauncherPlatform: Codable, Hashable, Identifiable {
     let symbol: String
     let isFavorite: Bool
     let lastOpenedAt: Date?
+
+    /// The name under an icon, where space is tight.
+    var shortName: String { id == "youtube_music" ? "YT Music" : name }
 }
 
 enum LauncherShared {
@@ -59,38 +62,33 @@ struct OpenPlatformFromWidgetIntent: AppIntent {
 
 // MARK: - Look
 
-/// The launcher widgets' backdrop: deep navy and violet, with a soft neon wave along the
-/// bottom, after QuietFeed's app icon. Fixed dark, so white text reads in both appearances.
-struct LauncherBackground: View {
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(
-                colors: [Color(red: 0.10, green: 0.08, blue: 0.24), Color(red: 0.05, green: 0.05, blue: 0.14)],
-                startPoint: .top, endPoint: .bottom
-            )
-            LauncherWave()
-                .fill(LinearGradient(
-                    colors: [Color(red: 0.45, green: 0.25, blue: 0.95).opacity(0.55),
-                             Color(red: 0.85, green: 0.25, blue: 0.75).opacity(0.35)],
-                    startPoint: .leading, endPoint: .trailing
-                ))
-                .frame(height: 28)
-                .blur(radius: 6)
-        }
-    }
-}
+/// QuietFeed's own colours, so the widgets look like the app and follow the person's Light or
+/// Dark appearance (values from the app's design tokens in `Theme.swift`).
+enum WidgetTheme {
+    /// The app's teal accent.
+    static let accent = adaptive(light: (0.055, 0.420, 0.439), dark: (0.361, 0.776, 0.769))
+    /// Text and glyphs drawn on the accent.
+    static let onAccent = adaptive(light: (1.000, 1.000, 1.000), dark: (0.024, 0.125, 0.122))
+    static let text = adaptive(light: (0.063, 0.094, 0.102), dark: (0.933, 0.961, 0.957))
+    /// Secondary text: 6.5:1 on white, 8:1 or better on the dark widget background.
+    static let muted = adaptive(light: (0.325, 0.376, 0.373), dark: (0.627, 0.690, 0.682))
+    /// The soft fill behind rows and app tiles.
+    static let tile = Color.primary.opacity(0.07)
+    /// The Dynamic Island is always black, so it keeps the bright neon teal.
+    static let islandAccent = Color(red: 0.36, green: 0.95, blue: 0.85)
 
-private struct LauncherWave: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addCurve(to: CGPoint(x: rect.maxX, y: rect.midY * 0.6),
-                      control1: CGPoint(x: rect.width * 0.35, y: rect.minY - 10),
-                      control2: CGPoint(x: rect.width * 0.65, y: rect.maxY + 6))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
+    private static func adaptive(light: (CGFloat, CGFloat, CGFloat), dark: (CGFloat, CGFloat, CGFloat)) -> Color {
+        #if canImport(UIKit)
+        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
+            ? UIColor(red: dark.0, green: dark.1, blue: dark.2, alpha: 1)
+            : UIColor(red: light.0, green: light.1, blue: light.2, alpha: 1) })
+        #else
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(red: dark.0, green: dark.1, blue: dark.2, alpha: 1)
+                : NSColor(red: light.0, green: light.1, blue: light.2, alpha: 1)
+        })
+        #endif
     }
 }
 
@@ -104,32 +102,25 @@ struct LauncherHeader: View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(WidgetTheme.onAccent)
                 .frame(width: 20, height: 20)
-                .background(LauncherStyle.brand, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .background(WidgetTheme.accent, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(WidgetTheme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 0)
             if showsChevron {
                 Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(WidgetTheme.muted)
                     .accessibilityHidden(true)
             }
         }
         .accessibilityAddTraits(.isHeader)
     }
-}
-
-enum LauncherStyle {
-    static let brand = LinearGradient(colors: [Color(red: 0.62, green: 0.36, blue: 1.0), Color(red: 0.42, green: 0.22, blue: 0.92)],
-                                      startPoint: .topLeading, endPoint: .bottomTrailing)
-    /// Text on the dark backdrop: 0.78 white is 9:1 or better on it.
-    static let secondaryText = Color.white.opacity(0.78)
 }
 
 /// A platform's icon: its brand colour behind its QuietFeed symbol. These are QuietFeed's own
@@ -146,7 +137,7 @@ struct PlatformIcon: View {
         case "spotify": ([Color(red: 0.12, green: 0.84, blue: 0.38), Color(red: 0.08, green: 0.62, blue: 0.28)], "waveform", .black)
         case "amazon_prime": ([Color(red: 0.12, green: 0.55, blue: 1.0), Color(red: 0.05, green: 0.30, blue: 0.80)], "play.square.stack.fill", .white)
         case "instagram": ([Color(red: 1.0, green: 0.70, blue: 0.20), Color(red: 0.93, green: 0.20, blue: 0.47), Color(red: 0.55, green: 0.22, blue: 0.85)], "camera", .white)
-        default: ([Color(red: 0.62, green: 0.36, blue: 1.0), Color(red: 0.42, green: 0.22, blue: 0.92)], platform.symbol, .white)
+        default: ([Color(red: 0.055, green: 0.420, blue: 0.439), Color(red: 0.04, green: 0.31, blue: 0.33)], platform.symbol, .white)
         }
     }
 
@@ -162,9 +153,9 @@ struct PlatformIcon: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
+                    .strokeBorder(.primary.opacity(0.12), lineWidth: 0.5)
             }
-            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+            .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
             .accessibilityHidden(true)
     }
 }
@@ -190,11 +181,11 @@ struct LauncherEmptyView: View {
         VStack(spacing: 4) {
             Image(systemName: "square.grid.2x2")
                 .font(.title3)
-                .foregroundStyle(.white)
+                .foregroundStyle(WidgetTheme.text)
                 .accessibilityHidden(true)
             Text("Choose platforms in QuietFeed")
                 .font(.caption)
-                .foregroundStyle(LauncherStyle.secondaryText)
+                .foregroundStyle(WidgetTheme.muted)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

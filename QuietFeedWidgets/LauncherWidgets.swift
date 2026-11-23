@@ -65,7 +65,8 @@ private struct LauncherContainer<Content: View>: View {
     var body: some View {
         content()
             .padding(14)
-            .containerBackground(for: .widget) { LauncherBackground() }
+            // The system widget background: light in Light mode, dark in Dark, like the app.
+            .containerBackground(.background, for: .widget)
             // Tapping anywhere outside an icon opens QuietFeed's Home.
             .widgetURL(LauncherShared.homeURL)
     }
@@ -110,9 +111,9 @@ struct FavoritesWidgetView: View {
                             PlatformButton(platform: platform) {
                                 VStack(spacing: 6) {
                                     PlatformIcon(platform: platform, size: 44)
-                                    Text(platform.name)
+                                    Text(platform.shortName)
                                         .font(.caption2.weight(.medium))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(WidgetTheme.text)
                                         .lineLimit(1)
                                         .minimumScaleFactor(0.7)
                                 }
@@ -174,19 +175,18 @@ struct OpenQuietFeedWidgetView: View {
             VStack(spacing: 8) {
                 Image(systemName: "movieclapper.fill")
                     .font(.title3)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.text)
                     .accessibilityHidden(true)
                 Text("Entertainment")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Image(systemName: "play.fill")
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(WidgetTheme.onAccent)
                     .frame(width: 48, height: 48)
-                    .background(LauncherStyle.brand, in: Circle())
-                    .shadow(color: Color(red: 0.62, green: 0.36, blue: 1.0).opacity(0.6), radius: 10)
+                    .background(WidgetTheme.accent, in: Circle())
                     .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -238,10 +238,10 @@ struct LibraryWidgetView: View {
             Text(value, format: .number)
                 .font(.caption.weight(.semibold).monospacedDigit())
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(WidgetTheme.text)
         .padding(.horizontal, 8)
         .frame(maxHeight: .infinity)
-        .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(WidgetTheme.tile, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -277,14 +277,14 @@ struct LauncherWidgetView: View {
                             PlatformButton(platform: platform) {
                                 VStack(spacing: 5) {
                                     PlatformIcon(platform: platform, size: 38)
-                                    Text(platform.name)
+                                    Text(platform.shortName)
                                         .font(.caption2.weight(.medium))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(WidgetTheme.text)
                                         .lineLimit(1)
                                         .minimumScaleFactor(0.7)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 70)
-                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .frame(maxWidth: .infinity, minHeight: 86)
+                                .background(WidgetTheme.tile, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
                         }
                     }
@@ -320,13 +320,13 @@ struct LauncherWidgetView: View {
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.forward")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(LauncherStyle.secondaryText)
+                    .foregroundStyle(WidgetTheme.muted)
                     .accessibilityHidden(true)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(WidgetTheme.text)
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 36)
-            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(WidgetTheme.tile, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 }

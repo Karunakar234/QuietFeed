@@ -1,6 +1,7 @@
 import AVFAudio
 import Foundation
 import Observation
+import os
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -35,6 +36,23 @@ final class WebModel: NSObject {
     /// When the person last tapped a link in the page; leaving the app needs a recent tap.
     @ObservationIgnored private var lastLinkTap: Date?
     private static let externalLinkGrace: TimeInterval = 10
+    /// When the page's web content process last ended unexpectedly, within `crashWindow`.
+    @ObservationIgnored private var processTerminations: [Date] = []
+    private static let crashWindow: TimeInterval = 60
+    private static let maxCrashReloads = 2
+    /// Automatic retries used since the last successful load (see `LoadFailurePolicy`).
+    @ObservationIgnored private var failedAttempts = 0
+    @ObservationIgnored private var retryTask: Task<Void, Never>?
+    /// Page loads as signpost intervals, so Instruments (os_signpost / Points of Interest)
+    /// shows how long each platform takes from navigation start to finish or failure.
+    private static let signposter = OSSignposter(subsystem: "com.kanna.quietfeed", category: .pointsOfInterest)
+    @ObservationIgnored private var loadInterval: OSSignpostIntervalState?
+
+    private func endLoadInterval(_ outcome: StaticString) {
+        guard let loadInterval else { return }
+        Self.signposter.endInterval("Page load", loadInterval, "\(outcome)")
+        self.loadInterval = nil
+    }
     #if canImport(UIKit)
     @ObservationIgnored private var refreshControl: UIRefreshControl?
     #endif
@@ -161,7 +179,8 @@ final class WebModel: NSObject {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
         "(KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
-    private static let videoPlatformIDs: Set<String> = [
+    /// Platforms whose pages play video: full screen, Picture in Picture and every-frame scripts.
+    static let videoPlatformIDs: Set<String> = [
         "youtube", "youtube_music", "netflix", "amazon_prime"
     ]
 
@@ -184,6 +203,8 @@ final class WebModel: NSObject {
     /// can outlive their view briefly, so relying on deallocation alone lets audio continue.
     func shutdown() {
         isVideoFullscreen = false
+        retryTask?.cancel()
+        retryTask = nil
         webView.evaluateJavaScript("""
         document.querySelectorAll('video, audio').forEach(function (media) {
           media.pause();
@@ -969,12 +990,31 @@ final class WebModel: NSObject {
         #if canImport(UIKit)
         refreshControl?.endRefreshing()
         #endif
-        let code = (error as NSError).code
-        if code == NSURLErrorCancelled { return }
-        // 102: "frame load interrupted" is what WebKit reports when we cancel a load ourselves.
-        if (error as NSError).domain == "WebKitErrorDomain" && code == 102 { return }
-        let offline = [NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorDataNotAllowed]
-        state = offline.contains(code) ? .offline : .error("Check your connection and try again.")
+        let nsError = error as NSError
+        endLoadInterval("failed")
+        switch LoadFailurePolicy.outcome(domain: nsError.domain, code: nsError.code, attempt: failedAttempts) {
+        case .ignore:
+            return
+        case .offline:
+            state = .offline
+        case .retry(let delay):
+            failedAttempts += 1
+            retryTask?.cancel()
+            retryTask = Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self else { return }
+                self.reload()
+            }
+        case .fail:
+            state = .error("Check your connection and try again.")
+        }
+    }
+
+    /// Reloads a page that couldn't load because the device was offline, once it's back online.
+    func connectivityChanged(isOnline: Bool) {
+        guard isOnline, state == .offline else { return }
+        failedAttempts = 0
+        reload()
     }
 }
 
@@ -1019,10 +1059,16 @@ extension WebModel: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         state = .loading(progress: webView.estimatedProgress)
+        endLoadInterval("superseded")
+        loadInterval = Self.signposter.beginInterval("Page load", id: Self.signposter.makeSignpostID(), "\(self.platform.id, privacy: .public)")
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         state = .loaded
+        endLoadInterval("finished")
+        failedAttempts = 0
+        retryTask?.cancel()
+        retryTask = nil
         #if canImport(UIKit)
         refreshControl?.endRefreshing()
         #endif
@@ -1038,6 +1084,14 @@ extension WebModel: WKNavigationDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         isVideoFullscreen = false
+        // Reload after a crash, but not forever: a page that keeps taking its process down
+        // (out of memory, say) would otherwise reload, crash and drain the battery in a loop.
+        let now = Date.now
+        processTerminations = processTerminations.filter { now.timeIntervalSince($0) < Self.crashWindow } + [now]
+        if processTerminations.count > Self.maxCrashReloads {
+            state = .error("This page keeps stopping. Reload to try again.")
+            return
+        }
         reload()
     }
 }

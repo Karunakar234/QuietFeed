@@ -9,9 +9,9 @@ import SwiftUI
 enum PreviewSupport {
     static let rules = BundledRuleProvider.loadNow()
 
-    private static let scratchFolder = FileManager.default.temporaryDirectory
+    static let scratchFolder = FileManager.default.temporaryDirectory
         .appendingPathComponent("QuietFeedPreviews", isDirectory: true)
-    private static let scratchDefaults = UserDefaults(suiteName: "QuietFeedPreviews") ?? .standard
+    static let scratchDefaults = UserDefaults(suiteName: "QuietFeedPreviews") ?? .standard
 
     /// An in-memory store with one settings row per platform; the first `enabledCount` are on.
     static func container(enabledCount: Int = 3) -> ModelContainer {
@@ -40,20 +40,17 @@ extension View {
     func previewEnvironment(enabledCount: Int = 3) -> some View {
         self
             .environment(RuleStore(provider: BundledRuleProvider(), preloaded: PreviewSupport.rules))
-            .environment(WeeklyInsightsStore(directory: PreviewSupport.scratchFolderURL))
-            .environment(UsageStore(directory: PreviewSupport.scratchFolderURL))
-            .environment(FocusSessionStore(defaults: PreviewSupport.scratchDefaultsStore))
-            .environment(OfflineAudioLibrary(directory: PreviewSupport.scratchFolderURL))
-            .environment(PlayerSession(defaults: PreviewSupport.scratchDefaultsStore))
+            .environment(WeeklyInsightsStore(directory: PreviewSupport.scratchFolder))
+            .environment(UsageStore(directory: PreviewSupport.scratchFolder))
+            .environment(FocusSessionStore(defaults: PreviewSupport.scratchDefaults))
+            .environment(OfflineAudioLibrary(directory: PreviewSupport.scratchFolder))
+            .environment(PlayerSession(defaults: PreviewSupport.scratchDefaults))
             .environment(ConnectivityMonitor())
-            .environment(AppLock(defaults: PreviewSupport.scratchDefaultsStore) { _ in .success(()) })
+            .environment(AppLock(defaults: PreviewSupport.scratchDefaults) { _ in .success(()) })
             .environment(IntentRouter())
             .modelContainer(PreviewSupport.container(enabledCount: enabledCount))
+            // As StillfeedApp does, so buttons and switches show the app's teal, not system blue.
+            .tint(Theme.color.accent)
     }
-}
-
-extension PreviewSupport {
-    static var scratchFolderURL: URL { scratchFolder }
-    static var scratchDefaultsStore: UserDefaults { scratchDefaults }
 }
 #endif

@@ -56,6 +56,19 @@ import Testing
         let store2 = FocusSessionStore(defaults: defaults)
         #expect(!store2.blocksPlatforms)
     }
+
+    @Test func disablingFocusStopsSessionAndPersists() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FocusSessionStore(defaults: defaults)
+        await store.start(minutes: 10)
+        store.setEnabled(false)
+
+        #expect(!store.isEnabled)
+        #expect(!store.isActive)
+        #expect(!FocusSessionStore(defaults: defaults).isEnabled)
+    }
 }
 
 @Suite struct UsageStoreTests {

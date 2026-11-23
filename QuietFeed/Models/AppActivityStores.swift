@@ -9,11 +9,13 @@ import UserNotifications
 final class FocusSessionStore {
     private enum Key {
         static let endDate = "focusSessionEndDate"
+        static let enabled = "focusModeEnabled"
         static let blockPlatforms = "focusBlocksQuietFeedPlatforms"
         static let notifications = "focusCompletionNotifications"
     }
 
     private(set) var endDate: Date?
+    private(set) var isEnabled: Bool
     var blocksPlatforms: Bool {
         didSet { defaults.set(blocksPlatforms, forKey: Key.blockPlatforms) }
     }
@@ -22,18 +24,37 @@ final class FocusSessionStore {
     }
 
     private let defaults: UserDefaults
+    /// Whether this store drives the widget and Live Activity. Only the app's own store does;
+    /// tests and previews pass their own defaults and leave the system untouched.
+    private let publishesToSystem: Bool
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, publishesToSystem: Bool? = nil) {
         self.defaults = defaults
+        self.publishesToSystem = publishesToSystem ?? (defaults === UserDefaults.standard)
         let savedEnd = defaults.object(forKey: Key.endDate) as? Date
         endDate = savedEnd.flatMap { $0 > .now ? $0 : nil }
+        isEnabled = defaults.object(forKey: Key.enabled) as? Bool ?? true
         blocksPlatforms = defaults.object(forKey: Key.blockPlatforms) as? Bool ?? true
         completionNotifications = defaults.object(forKey: Key.notifications) as? Bool ?? false
+        // Brings the widget in line after a relaunch and ends a Live Activity whose session
+        // finished while the app wasn't running.
+        publish()
+    }
+
+    private func publish() {
+        guard publishesToSystem else { return }
+        FocusSurfaces.publish(endDate: endDate, isEnabled: isEnabled)
     }
 
     var isActive: Bool {
-        guard let endDate else { return false }
+        guard isEnabled, let endDate else { return false }
         return endDate > .now
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        isEnabled = enabled
+        defaults.set(enabled, forKey: Key.enabled)
+        if enabled { publish() } else { stop() }
     }
 
     func remaining(at date: Date = .now) -> TimeInterval {
@@ -41,10 +62,12 @@ final class FocusSessionStore {
     }
 
     func start(minutes: Int) async {
+        guard isEnabled else { return }
         let duration = TimeInterval(max(1, minutes) * 60)
         let end = Date.now.addingTimeInterval(duration)
         endDate = end
         defaults.set(end, forKey: Key.endDate)
+        publish()
         if completionNotifications {
             await scheduleCompletionNotification(after: duration)
         }
@@ -53,6 +76,7 @@ final class FocusSessionStore {
     func stop() {
         endDate = nil
         defaults.removeObject(forKey: Key.endDate)
+        publish()
         #if canImport(UserNotifications)
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["quietfeed.focus.complete"])
         #endif

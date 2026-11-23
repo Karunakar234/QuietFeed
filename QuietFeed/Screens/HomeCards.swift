@@ -11,22 +11,54 @@ enum Neon {
     static let red = Color(red: 0.95, green: 0.25, blue: 0.30)
     static let navy = Color(red: 0.03, green: 0.04, blue: 0.12)
     static let deepViolet = Color(red: 0.06, green: 0.03, blue: 0.17)
+
+    /// Teal for icons, numbers and text that sit on the screen or on glass. The bright neon
+    /// teal can't be read on a light background, so Light mode uses the darker accent teal
+    /// from the design tokens; Dark mode keeps the neon. Fixed dark artwork (the Focus hero,
+    /// recommendation art) still uses `teal`.
+    static let glow = Color.adaptive(light: Color(red: 0.055, green: 0.420, blue: 0.439), dark: teal)
+}
+
+extension Color {
+    /// A colour that follows the current appearance, as the generated Theme colours do.
+    static func adaptive(light: Color, dark: Color) -> Color {
+        #if canImport(UIKit)
+        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
+        #elseif canImport(AppKit)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(dark) : NSColor(light)
+        })
+        #endif
+    }
 }
 
 // MARK: - Background
 
 /// The backdrop behind Home: deep navy with soft teal and violet light, like the icon.
+/// In Light mode it's a pale wash with fainter glows, so dark text stays readable on it.
 struct AuroraBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var baseColors: [Color] {
+        colorScheme == .dark
+            ? [Neon.navy, Neon.deepViolet, Neon.navy]
+            : [Color(red: 0.96, green: 0.98, blue: 0.98), Color(red: 0.96, green: 0.95, blue: 1.0),
+               Color(red: 0.96, green: 0.98, blue: 0.98)]
+    }
+
+    /// Light mode keeps the same glows at under half the strength.
+    private var glowScale: Double { colorScheme == .dark ? 1 : 0.4 }
+
     var body: some View {
         // The glows are an overlay so their fixed sizes never widen the layout: the backdrop
         // always takes exactly the space it's given, on any screen.
-        LinearGradient(colors: [Neon.navy, Neon.deepViolet, Neon.navy], startPoint: .top, endPoint: .bottom)
+        LinearGradient(colors: baseColors, startPoint: .top, endPoint: .bottom)
             .overlay {
                 ZStack {
-                    glow(Neon.violet, opacity: 0.55, width: 520, height: 260, x: 140, y: -340)
-                    glow(Neon.teal, opacity: 0.35, width: 420, height: 200, x: 200, y: -380)
-                    glow(Neon.teal, opacity: 0.22, width: 480, height: 240, x: 190, y: 90)
-                    glow(Neon.violet, opacity: 0.35, width: 540, height: 260, x: -170, y: 430)
+                    glow(Neon.violet, opacity: 0.55 * glowScale, width: 520, height: 260, x: 140, y: -340)
+                    glow(Neon.teal, opacity: 0.35 * glowScale, width: 420, height: 200, x: 200, y: -380)
+                    glow(Neon.teal, opacity: 0.22 * glowScale, width: 480, height: 240, x: 190, y: 90)
+                    glow(Neon.violet, opacity: 0.35 * glowScale, width: 540, height: 260, x: -170, y: 430)
                 }
             }
             .clipped()
@@ -68,67 +100,20 @@ struct GlassScreen<Content: View>: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s24) {
-                    GlassScreenHeader(title: title, subtitle: subtitle, symbol: symbol)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.color.textMuted)
                     content
                 }
                 .padding(.horizontal, Layout.screenPadding)
-                .padding(.top, Space.s8)
-                // The floating dock overlays the screen rather than participating in this
-                // scroll view's layout. Keep the final controls fully above it.
-                .padding(.bottom, 104)
+                .padding(.vertical, Space.s16)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
             }
-            .scrollIndicators(.hidden)
-            .background { AuroraBackground() }
-            #if os(macOS)
-            .toolbar(.hidden, for: .windowToolbar)
-            #else
-            .quietFeedNavigationChrome()
-            #endif
+            .background(Color.clear)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.large)
         }
-    }
-}
-
-extension View {
-    /// Keep the native Mac title bar and its traffic-light window controls. On compact Apple
-    /// platforms the in-content header remains the only navigation chrome.
-    @ViewBuilder
-    func quietFeedNavigationChrome() -> some View {
-        #if os(macOS)
-        self
-        #else
-        toolbar(.hidden, for: .navigationBar)
-        #endif
-    }
-}
-
-struct GlassScreenHeader: View {
-    let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
-    let symbol: String
-
-    var body: some View {
-        HStack(spacing: Space.s12) {
-            Image(systemName: symbol)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Neon.teal)
-                .frame(width: 52, height: 52)
-                .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: Space.s4) {
-                Text(title)
-                    .font(TypeRole.display)
-                    .foregroundStyle(.white)
-                Text(subtitle)
-                    .font(TypeRole.footnote)
-                    .foregroundStyle(.white.opacity(0.68))
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -148,26 +133,16 @@ struct GlassSectionCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s12) {
-            if let title {
-                Label {
-                    Text(title)
-                } icon: {
-                    if let symbol {
-                        Image(systemName: symbol)
-                            .foregroundStyle(Neon.teal)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .font(TypeRole.headline)
-                .foregroundStyle(.white)
-                .accessibilityAddTraits(.isHeader)
-            }
+        GroupBox {
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            if let title {
+                Label(title, systemImage: symbol ?? "circle")
+                    .accessibilityAddTraits(.isHeader)
+            }
         }
-        .padding(Space.s16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: Radius.lg))
     }
 }
 
@@ -308,7 +283,7 @@ struct PlatformArt {
             return PlatformArt(highlights: "Videos\u{00A0}• Live", iconColor: Neon.red,
                                artColors: [Neon.red, Neon.violet])
         case "youtube_music":
-            return PlatformArt(highlights: "Playlists\u{00A0}• Radio", iconColor: Neon.teal,
+            return PlatformArt(highlights: "Playlists\u{00A0}• Radio", iconColor: Neon.glow,
                                artColors: [Neon.violet, Neon.blue])
         case "netflix":
             return PlatformArt(highlights: "Movies\u{00A0}• Series", iconColor: Neon.red,
@@ -317,10 +292,10 @@ struct PlatformArt {
             return PlatformArt(highlights: "Movies\u{00A0}• Series", iconColor: Neon.blue,
                                artColors: [Neon.blue, Neon.teal])
         case "spotify":
-            return PlatformArt(highlights: "Music\u{00A0}• Playlists", iconColor: Neon.teal,
+            return PlatformArt(highlights: "Music\u{00A0}• Playlists", iconColor: Neon.glow,
                                artColors: [Neon.teal, Neon.navy])
         default:
-            return PlatformArt(highlights: "", iconColor: Neon.teal,
+            return PlatformArt(highlights: "", iconColor: Neon.glow,
                                artColors: [Neon.violet, Neon.blue])
         }
     }
@@ -334,8 +309,12 @@ struct ServiceCard: View {
     var isFavorite = false
     let action: () -> Void
     var toggleFavorite: () -> Void = {}
+    @Environment(\.colorScheme) private var colorScheme
 
     private var art: PlatformArt { .forPlatform(platform.id) }
+    /// The platform colour wash behind the card. Light mode uses a fainter one: at full strength
+    /// the dark navy end (Netflix, Spotify) greys the card and its subtitle drops below 4.5:1.
+    private var washOpacity: Double { colorScheme == .dark ? 0.35 : 0.12 }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: Radius.lg, style: .continuous) }
 
     var body: some View {
@@ -350,12 +329,12 @@ struct ServiceCard: View {
                     .accessibilityHidden(true)
                 Text(platform.name)
                     .font(TypeRole.footnote.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.color.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Text(art.highlights)
                     .font(TypeRole.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Theme.color.textMuted)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -364,7 +343,7 @@ struct ServiceCard: View {
             .padding(.vertical, Space.s12)
             .frame(maxWidth: .infinity, minHeight: 108)
             .background {
-                LinearGradient(colors: art.artColors.map { $0.opacity(0.35) },
+                LinearGradient(colors: art.artColors.map { $0.opacity(washOpacity) },
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                     .accessibilityHidden(true)
             }
@@ -411,7 +390,7 @@ struct RecentChip: View {
                     .accessibilityHidden(true)
                 Text(platform.name)
                     .font(TypeRole.footnote.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.color.text)
                     .lineLimit(1)
                     .fixedSize()
             }
@@ -484,17 +463,17 @@ struct RecommendationCard: View {
                 HStack(spacing: Space.s8) {
                     Image(systemName: "play.fill")
                         .font(TypeRole.caption.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.color.text)
                         .frame(width: 30, height: 30)
-                        .background(.white.opacity(0.15), in: Circle())
+                        .background(Theme.color.text.opacity(0.12), in: Circle())
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(pick.title)
                             .font(TypeRole.footnote.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Theme.color.text)
                         Text(platformName)
                             .font(TypeRole.caption)
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(Theme.color.textMuted)
                     }
                     .lineLimit(1)
                 }
@@ -531,20 +510,20 @@ struct InsightsCard: View {
             Label {
                 Text("Your Weekly Insights")
             } icon: {
-                Image(systemName: "chart.bar.fill").foregroundStyle(Neon.teal)
+                Image(systemName: "chart.bar.fill").foregroundStyle(Neon.glow)
             }
             .font(TypeRole.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.color.text)
             .accessibilityAddTraits(.isHeader)
 
             HStack(alignment: .bottom, spacing: Space.s16) {
                 VStack(alignment: .leading, spacing: Space.s4) {
                     Text(insights.totalHidden, format: .number)
                         .font(TypeRole.display)
-                        .foregroundStyle(Neon.teal)
+                        .foregroundStyle(Neon.glow)
                     Text("items filtered this week")
                         .font(TypeRole.footnote)
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(Theme.color.textMuted)
                 }
 
                 Spacer(minLength: 0)
@@ -553,14 +532,14 @@ struct InsightsCard: View {
                     ForEach(counts.indices, id: \.self) { index in
                         VStack(spacing: Space.s4) {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(Neon.teal.opacity(counts[index] == 0 ? 0.18 : 0.85))
+                                .fill(Neon.glow.opacity(counts[index] == 0 ? 0.18 : 0.85))
                                 .frame(
                                     width: 18,
                                     height: max(4, 44 * CGFloat(counts[index]) / CGFloat(highestCount))
                                 )
                             Text(days[index])
                                 .font(TypeRole.caption)
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(Theme.color.textMuted)
                                 .lineLimit(1)
                                 .fixedSize()
                         }
