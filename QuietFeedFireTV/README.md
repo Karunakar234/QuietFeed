@@ -1,25 +1,24 @@
 # QuietFeed for Fire TV
 
-The Fire TV version of QuietFeed. It works like a TV app: the remote moves a highlight between videos and buttons, choosing a video plays it full screen, and Menu (≡) opens the app menu.
+The Fire TV version of QuietFeed, built to work like TV apps: everything is driven by the remote, and there is no pointer anywhere.
 
 | Platform | On Fire TV |
 |---|---|
-| YouTube | Filtered in QuietFeed. Videos open full screen with native controls |
-| YouTube Music, Instagram | Filtered in QuietFeed |
+| YouTube, YouTube Music | **YouTube's own TV interface** (youtube.com/tv): the interface YouTube's TV apps use, so it looks and drives like the YouTube app, with sign-in by code on your phone. QuietFeed skips ads and removes Shorts. On Fire TV, YouTube Music lives inside it, as in the official app |
+| Instagram | Filtered in QuietFeed. Arrows move a highlight between posts and buttons; videos play full screen with native controls |
 | Netflix, Prime Video, Spotify | Opens their Fire TV app (their websites' DRM players won't run inside an app on Android), as the Apple TV version does |
 
-The filtered platforms run the **same `rules.json` and `FilterEngine.js`** from `../QuietFeed/Filtering`, copied in at build time, so a rule change ships to iPhone and Fire TV from one file. `NavigationGuard` is ported to Kotlin with main's hardening (https only, no top-level `blob:`/`data:`), and only the platform's own top-level page can report to the app, as on iOS.
+How the filtering works on each:
 
-`app/src/main/assets/TvNav.js` is the Fire TV-only part: it finds everything selectable on the page, moves the highlight in the direction pressed (staying in the same row or column), scrolls to keep it in view, and skips anything the filters hid. Selecting is a real native tap, so sites treat it as a person's tap.
+- **YouTube's TV interface** has a different page structure from the mobile site the shared rules describe, so `YtTv.js` removes Shorts from YouTube's data before anything is drawn (every Short carries the same markers in YouTube's data on every client), and `FilterEngine.js` runs only its ad skipping, which already works on that data. Switches: Hide Shorts, Remove ads.
+- **Instagram** runs the **same `rules.json` and `FilterEngine.js`** as iPhone, copied in from `../QuietFeed/Filtering` at build time, plus `TvNav.js`, which moves the highlight in the direction pressed (staying in the same row or column), scrolls to keep it in view, and skips anything the filters hid. Selecting is a real native tap.
+- `NavigationGuard` is ported to Kotlin with main's hardening (https only, no top-level `blob:`/`data:`), and only the platform's own top-level page can report to the app, as on iOS.
 
 ## Using the remote
 
-- **Arrows**: move between videos, tabs and buttons.
-- **OK**: select. In a full-screen video: play/pause.
-- **Left / Right in full-screen video**: skip back or forward 10 seconds. **Up / Down** show the progress bar.
-- **Back**: leave full screen, then the previous page, then back to QuietFeed's home.
-- **Menu (≡)**: Home, Reload, this platform's Filters, Pointer mode (a free pointer for anything the highlight can't reach), Close.
-- **Play/Pause, Rewind, Fast-forward**: control the video.
+- **YouTube / YouTube Music**: exactly as the YouTube app. **Back** goes back; on YouTube's home it asks to exit.
+- **Instagram**: arrows move between posts, tabs and buttons, **OK** selects, **Back** goes to the previous page, then home. In a full-screen video, **OK** plays/pauses, **left/right** skip 10 seconds.
+- **Menu (≡)**, everywhere: QuietFeed's menu with Home, Reload, this platform's Filters (they apply immediately) and Close.
 
 Not ported: multiple accounts per platform (Android's web view shares one cookie store), background audio, the mini-player, widgets, and the Blocking and Stats tabs.
 

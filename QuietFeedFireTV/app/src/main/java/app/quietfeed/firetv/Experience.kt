@@ -8,8 +8,14 @@ import android.widget.Toast
 
 /** How a platform runs on Fire TV. */
 sealed interface Experience {
-    /** Filtered inside QuietFeed. [autoFullscreen]: choosing a video opens it full screen. */
-    data class InApp(val autoFullscreen: Boolean) : Experience
+    /**
+     * Filtered inside QuietFeed.
+     *
+     * [tvInterface]: load YouTube's own TV interface (youtube.com/tv) from [startUrl]. It is the
+     * interface YouTube's TV apps use, so it is driven by the remote exactly like the app: QuietFeed
+     * passes the keys straight through. Otherwise the site is driven with TvNav.js's highlight.
+     */
+    data class InApp(val startUrl: String? = null, val tvInterface: Boolean = false) : Experience
 
     /**
      * Opens the platform's own Fire TV app, as the Apple TV version does. Their websites use DRM
@@ -18,12 +24,32 @@ sealed interface Experience {
     data class NativeApp(val packageName: String) : Experience
 
     companion object {
+        const val HIDE_SHORTS = "hide_shorts"
+        private val AD_KEYS = setOf("skip_ads", "hide_ads")
+
+        /**
+         * In YouTube's TV interface the engine runs only its ad skipping: the shared layout rules
+         * describe the mobile site, and Shorts are removed from the data by YtTv.js instead.
+         */
+        fun isTvInterfaceRule(rule: FilterRule): Boolean = rule.key in AD_KEYS
+
+        /** The filter switches that do something on Fire TV for this platform. */
+        fun visibleToggles(platformId: String, toggles: List<RuleToggle>): List<RuleToggle> {
+            val experience = of(platformId)
+            return if (experience is InApp && experience.tvInterface) {
+                toggles.filter { it.key in AD_KEYS || it.key == HIDE_SHORTS }
+            } else {
+                toggles
+            }
+        }
+
         fun of(platformId: String): Experience = when (platformId) {
             "netflix" -> NativeApp("com.netflix.ninja")
             "amazon_prime" -> NativeApp("com.amazon.avod")
             "spotify" -> NativeApp("com.spotify.tv.android")
-            "youtube" -> InApp(autoFullscreen = true)
-            else -> InApp(autoFullscreen = false)
+            // On Fire TV, YouTube Music lives inside YouTube's TV interface (there's no separate TV app).
+            "youtube", "youtube_music" -> InApp(startUrl = "https://www.youtube.com/tv", tvInterface = true)
+            else -> InApp()
         }
     }
 }

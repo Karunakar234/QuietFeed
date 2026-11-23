@@ -26,6 +26,13 @@ class MainActivity : Activity() {
     private lateinit var store: RuleStore
     private var screen = Screen.HOME
     private val picked = mutableSetOf<String>()
+    /** Where focus starts on the screen being built: content first, as TV apps do, not the tab bar. */
+    private var preferredFocus: View? = null
+
+    private fun <V : View> V.preferred(): V {
+        if (preferredFocus == null) preferredFocus = this
+        return this
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +76,7 @@ class MainActivity : Activity() {
 
     private fun show(next: Screen) {
         screen = next
+        preferredFocus = null
         val content = when (next) {
             Screen.WELCOME -> welcome()
             Screen.PICK -> pickPlatforms()
@@ -77,7 +85,7 @@ class MainActivity : Activity() {
             Screen.SETTINGS -> page(Screen.SETTINGS, settings())
         }
         setContentView(content)
-        content.post { firstFocusable(content)?.requestFocus() }
+        content.post { (preferredFocus ?: firstFocusable(content))?.requestFocus() }
     }
 
     // MARK: Onboarding
@@ -157,7 +165,7 @@ class MainActivity : Activity() {
             add(text("No platforms on your home screen yet. Turn some on in Settings.", 20f, Ui.TEXT_MUTED))
         } else {
             add(grid(enabled, columns = 3, spacingDp = 28) { platform ->
-                val card = platformCard(platform, selectable = false, selected = false)
+                val card = platformCard(platform, selectable = false, selected = false).preferred()
                 card.makeFocusable { open(platform) }
                 card to Pair(dp(270), dp(170))
             })
@@ -181,14 +189,14 @@ class MainActivity : Activity() {
         add(text("Filters", 32f, bold = true))
         add(text("Choose what QuietFeed hides on each platform. You can also change them from a platform's menu (≡).", 18f, Ui.TEXT_MUTED))
         store.platforms.filter { Experience.of(it.id) is Experience.InApp }.forEach { platform ->
-            val toggles = store.toggles(platform.id)
+            val toggles = Experience.visibleToggles(platform.id, store.toggles(platform.id))
             if (toggles.isEmpty()) return@forEach
             add(vertical(12) {
                 add(text(platform.name, 24f, Ui.tint(platform.id), bold = true))
                 toggles.forEach { toggle ->
                     add(switchRow(toggle.title, toggle.detail, { prefs.toggles(platform.id)[toggle.key] ?: toggle.defaultOn }) { on ->
                         prefs.setToggle(platform.id, toggle.key, on)
-                    })
+                    }.preferred())
                 }
             })
         }
@@ -201,7 +209,7 @@ class MainActivity : Activity() {
             store.platforms.forEach { platform ->
                 add(switchRow(platform.name, platform.tagline, { prefs.isEnabled(platform.id) }) { on ->
                     prefs.setEnabled(platform.id, on)
-                })
+                }.preferred())
             }
         })
         add(vertical(12) {

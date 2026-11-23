@@ -39,13 +39,15 @@ import org.json.JSONObject
 
 /**
  * One platform, filtered, driven like a TV app: the Fire TV counterpart of PlatformScreen +
- * WebModel. FilterEngine.js and NavigationGuard filter the site as on iPhone; TvNav.js moves a
- * highlight between the things you can select, and choosing a video opens it full screen with
- * native playback controls.
+ * WebModel. There is no pointer anywhere.
  *
- * Remote: arrows move between items, OK selects, Back goes back a page then closes, Menu opens
- * the menu (Home, Reload, Filters, Pointer mode, Close). In full-screen video: OK or play/pause
- * plays and pauses, left and right skip 10 seconds, Back leaves full screen.
+ * YouTube and YouTube Music open YouTube's own TV interface, which handles the remote itself
+ * exactly as the YouTube app does; QuietFeed passes the keys through, strips ads (FilterEngine.js)
+ * and Shorts (YtTv.js) from its data, and keeps Menu (≡) for its own menu.
+ *
+ * Other platforms (Instagram) are the site driven by TvNav.js: arrows move a highlight between
+ * the things you can select, OK selects, Back goes back a page then closes. Their videos play full
+ * screen with native controls: OK plays and pauses, left and right skip 10 seconds.
  */
 class PlayerActivity : Activity() {
 
@@ -62,12 +64,11 @@ class PlayerActivity : Activity() {
     private lateinit var bridge: PageBridge
     private lateinit var guard: NavigationGuard
     private lateinit var engineSource: String
-    private lateinit var tvNavSource: String
+    private lateinit var navSource: String
     private lateinit var pageScript: String
 
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
-    private lateinit var cursor: CursorView
     private lateinit var progress: ProgressBar
     private var splash: View? = null
     private var menu: View? = null
@@ -82,7 +83,6 @@ class PlayerActivity : Activity() {
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
     private var scriptHandler: ScriptHandler? = null
     private var usesFallbackInjection = false
-    private var pointerMode = false
     private var firstLoadDone = false
     private var lastMoveAt = 0L
     private var touchDownTime = 0L
@@ -108,19 +108,17 @@ class PlayerActivity : Activity() {
         val rules = currentRules()
         guard = NavigationGuard(platform, rules)
         engineSource = asset("FilterEngine.js")
-        tvNavSource = asset("TvNav.js")
+        navSource = asset(if (experience.tvInterface) "YtTv.js" else "TvNav.js")
         pageScript = buildPageScript(rules)
 
         root = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
         webView = WebView(this)
-        cursor = CursorView(this).apply { visibility = View.GONE }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progressTintList = ColorStateList.valueOf(Ui.ACCENT)
             visibility = View.GONE
         }
         root.addView(webView, FrameLayout.LayoutParams(match(), match()))
-        root.addView(cursor, FrameLayout.LayoutParams(match(), match()))
         root.addView(progress, FrameLayout.LayoutParams(match(), dp(3), Gravity.TOP))
         buildOsd()
         showSplash()
@@ -128,16 +126,32 @@ class PlayerActivity : Activity() {
 
         configure(webView)
         webView.requestFocus()
-        webView.loadUrl(platform.baseUrl)
+        webView.loadUrl(home)
     }
+
+    private val home: String get() = experience.startUrl ?: platform.baseUrl
 
     private fun asset(name: String) = assets.open(name).bufferedReader().use { it.readText() }
 
-    private fun currentRules() = store.enabledRules(platform.id, prefs.toggles(platform.id))
+    private fun currentRules(): List<FilterRule> {
+        val rules = store.enabledRules(platform.id, prefs.toggles(platform.id))
+        // The mobile-site layout rules don't describe the TV interface and could hide its menus.
+        return if (experience.tvInterface) rules.filter { Experience.isTvInterfaceRule(it) } else rules
+    }
 
-    private fun buildPageScript(rules: List<FilterRule>): String =
-        PageBridge.SHIM + "\n" + engineSource + "\n" + bootScript(RuleStore.toEngineJson(rules)) + "\n" + tvNavSource +
-            "\nwindow.__qfTv && window.__qfTv.configure({ autoFullscreen: ${experience.autoFullscreen} });"
+    /** Shorts are hidden from the TV interface's data when YouTube's "Hide Shorts" is on. */
+    private fun hideShorts(): Boolean =
+        store.enabledRules("youtube", prefs.toggles("youtube")).any { it.key == Experience.HIDE_SHORTS }
+
+    private fun buildPageScript(rules: List<FilterRule>): String {
+        val base = PageBridge.SHIM + "\n" + engineSource + "\n" + bootScript(RuleStore.toEngineJson(rules)) + "\n"
+        return if (experience.tvInterface) {
+            val stripAds = rules.any { it.action == "skip_ads" }
+            base + "window.__qfYtTvOptions = { hideShorts: ${hideShorts()}, stripAds: $stripAds };\n" + navSource
+        } else {
+            base + navSource + "\nwindow.__qfTv && window.__qfTv.configure({ autoFullscreen: false });"
+        }
+    }
 
     /**
      * Android runs document-start scripts before the <html> element exists (WebKit runs them just
@@ -164,8 +178,8 @@ class PlayerActivity : Activity() {
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = false
             setSupportMultipleWindows(false) // target=_blank links load here, through the guard
-            // The rules are written for the mobile sites, so present as a phone browser.
-            userAgentString = mobileUserAgent()
+            // YouTube serves its TV interface to TVs; the shared rules are written for mobile sites.
+            userAgentString = if (experience.tvInterface) tvUserAgent() else mobileUserAgent()
         }
         view.isVerticalScrollBarEnabled = false
         view.isHorizontalScrollBarEnabled = false
@@ -213,11 +227,15 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun mobileUserAgent(): String {
-        val chrome = Regex("Chrome/([\\d.]+)").find(WebSettings.getDefaultUserAgent(this))?.groupValues?.get(1)
-            ?: "120.0.0.0"
-        return "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$chrome Mobile Safari/537.36"
-    }
+    private fun chromeVersion(): String =
+        Regex("Chrome/([\\d.]+)").find(WebSettings.getDefaultUserAgent(this))?.groupValues?.get(1) ?: "120.0.0.0"
+
+    private fun mobileUserAgent(): String =
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion()} Mobile Safari/537.36"
+
+    /** A Chromium-based smart TV (LG webOS), whose YouTube app is this same TV interface. */
+    private fun tvUserAgent(): String =
+        "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion()} Safari/537.36 WebAppManager"
 
     private fun js(source: String, result: ((String?) -> Unit)? = null) {
         if (result == null) webView.evaluateJavascript(source, null)
@@ -245,31 +263,32 @@ class PlayerActivity : Activity() {
             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) { if (up) closeMenu(); return true }
             return super.dispatchKeyEvent(event)
         }
-        if (fullscreenView != null) return fullscreenKey(event)
+        if (fullscreenView != null) {
+            // YouTube's TV interface drives its own player; only Back is ours, to leave full screen.
+            if (experience.tvInterface && code != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+            return fullscreenKey(event)
+        }
         if (splash != null) {
             if (code == KeyEvent.KEYCODE_BACK && up) finish()
             return true
         }
 
+        if (code == KeyEvent.KEYCODE_MENU) { if (up) openMenu(); return true }
+        if (experience.tvInterface) return tvInterfaceKey(event)
+
         when (code) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                if (down) arrow(code, event.repeatCount)
+                if (down) arrow(code)
                 return true
             }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (pointerMode) {
-                    if (down && event.repeatCount == 0) touch(MotionEvent.ACTION_DOWN, cursor.x0, cursor.y0)
-                    if (up) touch(MotionEvent.ACTION_UP, cursor.x0, cursor.y0)
-                } else if (up) {
-                    select()
-                }
+                if (up) select()
                 return true
             }
             KeyEvent.KEYCODE_BACK -> {
                 if (up) { if (webView.canGoBack()) webView.goBack() else finish() }
                 return true
             }
-            KeyEvent.KEYCODE_MENU -> { if (up) openMenu(); return true }
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
                 if (up) media("toggle"); return true
             }
@@ -279,18 +298,26 @@ class PlayerActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private fun arrow(code: Int, repeat: Int) {
-        val (dx, dy, dir) = when (code) {
-            KeyEvent.KEYCODE_DPAD_UP -> Triple(0, -1, "up")
-            KeyEvent.KEYCODE_DPAD_DOWN -> Triple(0, 1, "down")
-            KeyEvent.KEYCODE_DPAD_LEFT -> Triple(-1, 0, "left")
-            else -> Triple(1, 0, "right")
+    /**
+     * YouTube's TV interface reads the remote itself, as in the YouTube app: arrows, OK and the
+     * media keys go straight to it. Back becomes Escape, which is its Back; leaving from its home
+     * screen asks "Exit YouTube?" and closes the window, which closes this screen.
+     */
+    private fun tvInterfaceKey(event: KeyEvent): Boolean {
+        if (!webView.hasFocus()) webView.requestFocus()
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            webView.dispatchKeyEvent(KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_ESCAPE, event.repeatCount))
+            return true
         }
-        if (pointerMode) {
-            val step = dp(8) + dp(3) * minOf(repeat, 10)
-            val (overX, overY) = cursor.moveBy((dx * step).toFloat(), (dy * step).toFloat())
-            if (overX != 0f || overY != 0f) scrollAtPointer(dx, dy)
-            return
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun arrow(code: Int) {
+        val dir = when (code) {
+            KeyEvent.KEYCODE_DPAD_UP -> "up"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+            else -> "right"
         }
         // Holding an arrow repeats fast; one step per interval keeps the page smooth.
         val now = SystemClock.uptimeMillis()
@@ -318,36 +345,10 @@ class PlayerActivity : Activity() {
             touchDownTime = now
             if (!webView.hasFocus()) webView.requestFocus()
         }
-        if (pointerMode) cursor.setDown(action == MotionEvent.ACTION_DOWN)
         val event = MotionEvent.obtain(touchDownTime, now, action, x, y, 0)
         event.source = InputDevice.SOURCE_TOUCHSCREEN
         webView.dispatchTouchEvent(event)
         event.recycle()
-    }
-
-    /** Pointer mode: scrolls whatever is scrollable under the pointer, unless a single reel is locked. */
-    private fun scrollAtPointer(dx: Int, dy: Int) {
-        if (guard.isSingleItem(webView.url?.let(Uri::parse))) return
-        @Suppress("DEPRECATION")
-        val scale = webView.scale
-        val x = cursor.x0 / scale
-        val y = cursor.y0 / scale
-        val amount = 140
-        js(
-            """
-            (function (x, y, dx, dy) {
-              var el = document.elementFromPoint(x, y);
-              while (el && el !== document.body && el !== document.documentElement) {
-                var s = getComputedStyle(el);
-                var canY = dy && /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight;
-                var canX = dx && /(auto|scroll)/.test(s.overflowX) && el.scrollWidth > el.clientWidth;
-                if (canY || canX) { el.scrollBy({ left: dx, top: dy, behavior: 'smooth' }); return; }
-                el = el.parentElement;
-              }
-              window.scrollBy({ left: dx, top: dy, behavior: 'smooth' });
-            })($x, $y, ${dx * amount}, ${dy * amount});
-            """.trimIndent()
-        )
     }
 
     // MARK: Video
@@ -445,7 +446,6 @@ class PlayerActivity : Activity() {
         root.removeView(osd)
         osd.visibility = View.GONE
         webView.visibility = View.VISIBLE
-        if (pointerMode) cursor.visibility = View.VISIBLE
         webView.requestFocus()
     }
 
@@ -477,10 +477,10 @@ class PlayerActivity : Activity() {
         firstLoadDone = true
         view.animate().alpha(0f).setDuration(250).withEndAction { root.removeView(view) }.start()
         // Start with something selected, as a TV app does.
-        webView.postDelayed({ if (!pointerMode) js("window.__qfTv && window.__qfTv.move('down');") }, 700)
+        if (!experience.tvInterface) webView.postDelayed({ js("window.__qfTv && window.__qfTv.move('down');") }, 700)
         if (!prefs.sawTvTip) {
             prefs.sawTvTip = true
-            showTip("◀ ▲ ▼ ▶ move  ·  OK select  ·  ≡ menu  ·  Back go back")
+            showTip(if (experience.tvInterface) "≡  QuietFeed menu: filters, reload, close" else "◀ ▲ ▼ ▶ move  ·  OK select  ·  ≡ menu  ·  Back go back")
         }
     }
 
@@ -507,12 +507,9 @@ class PlayerActivity : Activity() {
                 add(text(platform.name, 28f, bold = true), wrap())
             })
             add(View(context), match(), dp(8))
-            add(menuRow("Home") { closeMenu(); webView.loadUrl(platform.baseUrl) })
+            add(menuRow("Home") { closeMenu(); webView.loadUrl(home) })
             add(menuRow("Reload") { closeMenu(); reload() })
-            add(switchRow("Pointer mode", "Move a pointer instead, for anything the highlight can't reach.", { pointerMode }) { on ->
-                setPointerMode(on)
-            })
-            val toggles = store.toggles(platform.id)
+            val toggles = Experience.visibleToggles(platform.id, store.toggles(platform.id))
             if (toggles.isNotEmpty()) {
                 add(text("Filters", 18f, Ui.TEXT_MUTED, bold = true).apply { setPadding(0, dp(16), 0, 0) })
                 toggles.forEach { toggle ->
@@ -553,15 +550,6 @@ class PlayerActivity : Activity() {
         webView.requestFocus()
     }
 
-    private fun setPointerMode(on: Boolean) {
-        pointerMode = on
-        cursor.visibility = if (on) View.VISIBLE else View.GONE
-        if (on) {
-            cursor.wake()
-            js("window.__qfTv && window.__qfTv.clear();")
-        }
-    }
-
     /** A filter switch changed: the guard, future pages and the open page all follow at once. */
     private fun applyRules() {
         val rules = currentRules()
@@ -573,7 +561,7 @@ class PlayerActivity : Activity() {
 
     private fun reload() {
         hideError()
-        if (webView.url == null) webView.loadUrl(platform.baseUrl) else webView.reload()
+        if (webView.url == null) webView.loadUrl(home) else webView.reload()
     }
 
     // MARK: Errors
@@ -622,13 +610,17 @@ class PlayerActivity : Activity() {
             root.addView(view, FrameLayout.LayoutParams(match(), match()))
             root.addView(osd, FrameLayout.LayoutParams(match(), wrap(), Gravity.BOTTOM))
             webView.visibility = View.INVISIBLE
-            cursor.visibility = View.GONE
             media("status")
             showOsd()
         }
 
         override fun onHideCustomView() {
             leaveFullscreenViews()
+        }
+
+        /** "Exit YouTube?" → Exit in the TV interface closes the window: leave the platform. */
+        override fun onCloseWindow(window: WebView) {
+            finish()
         }
 
         /** No grey play-button placeholder before a video starts. */
