@@ -53,6 +53,13 @@ final class PlayerSession {
         preloaded = nil
     }
 
+    /// Releases only the speculative background page. The platform currently on screen and its
+    /// signed-in session remain untouched.
+    func handleMemoryWarning() {
+        preloaded?.shutdown()
+        preloaded = nil
+    }
+
     /// Whether `model` is the page kept in the background, so closing mustn't shut it down.
     func isPreloaded(_ model: WebModel) -> Bool { preloaded === model }
 

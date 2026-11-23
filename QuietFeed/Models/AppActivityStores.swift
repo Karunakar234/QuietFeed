@@ -12,10 +12,12 @@ final class FocusSessionStore {
         static let enabled = "focusModeEnabled"
         static let blockPlatforms = "focusBlocksQuietFeedPlatforms"
         static let notifications = "focusCompletionNotifications"
+        static let pausedRemaining = "focusPausedRemaining"
     }
 
     private(set) var endDate: Date?
     private(set) var isEnabled: Bool
+    private(set) var pausedRemaining: TimeInterval
     var blocksPlatforms: Bool {
         didSet { defaults.set(blocksPlatforms, forKey: Key.blockPlatforms) }
     }
@@ -36,6 +38,7 @@ final class FocusSessionStore {
         isEnabled = defaults.object(forKey: Key.enabled) as? Bool ?? true
         blocksPlatforms = defaults.object(forKey: Key.blockPlatforms) as? Bool ?? true
         completionNotifications = defaults.object(forKey: Key.notifications) as? Bool ?? false
+        pausedRemaining = max(0, defaults.double(forKey: Key.pausedRemaining))
         // Brings the widget in line after a relaunch and ends a Live Activity whose session
         // finished while the app wasn't running.
         publish()
@@ -51,6 +54,8 @@ final class FocusSessionStore {
         return endDate > .now
     }
 
+    var isPaused: Bool { isEnabled && pausedRemaining > 0 && endDate == nil }
+
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         defaults.set(enabled, forKey: Key.enabled)
@@ -58,13 +63,15 @@ final class FocusSessionStore {
     }
 
     func remaining(at date: Date = .now) -> TimeInterval {
-        max(0, endDate?.timeIntervalSince(date) ?? 0)
+        isPaused ? pausedRemaining : max(0, endDate?.timeIntervalSince(date) ?? 0)
     }
 
     func start(minutes: Int) async {
         guard isEnabled else { return }
         let duration = TimeInterval(max(1, minutes) * 60)
         let end = Date.now.addingTimeInterval(duration)
+        pausedRemaining = 0
+        defaults.removeObject(forKey: Key.pausedRemaining)
         endDate = end
         defaults.set(end, forKey: Key.endDate)
         publish()
@@ -73,9 +80,35 @@ final class FocusSessionStore {
         }
     }
 
+    func pause() {
+        guard isActive else { return }
+        pausedRemaining = remaining()
+        endDate = nil
+        defaults.set(pausedRemaining, forKey: Key.pausedRemaining)
+        defaults.removeObject(forKey: Key.endDate)
+        publish()
+        #if canImport(UserNotifications)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["quietfeed.focus.complete"])
+        #endif
+    }
+
+    func resume() async {
+        guard isPaused else { return }
+        let remaining = pausedRemaining
+        pausedRemaining = 0
+        defaults.removeObject(forKey: Key.pausedRemaining)
+        let end = Date.now.addingTimeInterval(remaining)
+        endDate = end
+        defaults.set(end, forKey: Key.endDate)
+        publish()
+        if completionNotifications { await scheduleCompletionNotification(after: remaining) }
+    }
+
     func stop() {
         endDate = nil
+        pausedRemaining = 0
         defaults.removeObject(forKey: Key.endDate)
+        defaults.removeObject(forKey: Key.pausedRemaining)
         publish()
         #if canImport(UserNotifications)
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["quietfeed.focus.complete"])

@@ -25,6 +25,7 @@ struct PlatformScreen: View {
     @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @Query private var settings: [PlatformSetting]
     @Query private var accounts: [Account]
     @State private var model: WebModel?
@@ -114,7 +115,7 @@ struct PlatformScreen: View {
                 }
                 ZStack {
                     if let model {
-                        WebViewContainer(model: model)
+                        WebViewContainer(model: model, colorScheme: colorScheme)
                             .accessibilityHidden(minimized)
                         if !minimized { overlay(for: model) }
                     } else {

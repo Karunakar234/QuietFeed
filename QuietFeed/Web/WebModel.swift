@@ -181,7 +181,8 @@ final class WebModel: NSObject {
 
     /// Platforms whose pages play video: full screen, Picture in Picture and every-frame scripts.
     static let videoPlatformIDs: Set<String> = [
-        "youtube", "youtube_music", "netflix", "amazon_prime"
+        "youtube", "youtube_music", "netflix", "amazon_prime", "hbo_max",
+        "disney_plus", "hulu", "paramount_plus", "peacock"
     ]
 
     func loadHome() {

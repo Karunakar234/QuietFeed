@@ -11,6 +11,8 @@ struct HomeScreen: View {
     @Query(sort: \PlatformSetting.sortOrder) private var settings: [PlatformSetting]
     @Query private var accounts: [Account]
     @State private var search = ""
+    @State private var isSearchPresented = false
+    @FocusState private var isSearchFocused: Bool
     @State private var showFocusControls = false
     @State private var showBlockedMessage = false
     @AppStorage("showFocusModeCard") private var showFocusModeCard = true
@@ -105,12 +107,40 @@ struct HomeScreen: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
-            .searchable(
-                text: $search,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search platforms, picks, filters and audio"
-            )
             .navigationTitle("QuietFeed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if isSearchPresented {
+                        TextField("Search QuietFeed", text: $search)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isSearchFocused)
+                            .frame(minWidth: 180, maxWidth: 280)
+                            .submitLabel(.search)
+                            .accessibilityLabel("Search QuietFeed")
+                    } else {
+                        Text("QuietFeed")
+                            .font(TypeRole.headline)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isSearchPresented {
+                        Button("Cancel") {
+                            search = ""
+                            isSearchFocused = false
+                            isSearchPresented = false
+                        }
+                    } else {
+                        Button {
+                            isSearchPresented = true
+                            isSearchFocused = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel("Search QuietFeed")
+                    }
+                }
+            }
             .task(id: platformToPreload?.id) { await preload(platformToPreload) }
             .animation(Motion.gentle, value: showFocusModeCard)
         }

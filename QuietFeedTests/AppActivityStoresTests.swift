@@ -36,6 +36,28 @@ import Testing
         #expect(store.remaining() == 0)
     }
 
+    @Test func pauseResumeAndRestorePreserveRemainingTime() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FocusSessionStore(defaults: defaults)
+        await store.start(minutes: 10)
+        store.pause()
+        let paused = store.remaining()
+        #expect(store.isPaused)
+        #expect(!store.isActive)
+        #expect(paused > 500 && paused <= 600)
+
+        let restored = FocusSessionStore(defaults: defaults)
+        #expect(restored.isPaused)
+        #expect(abs(restored.remaining() - paused) < 1)
+
+        await restored.resume()
+        #expect(restored.isActive)
+        #expect(!restored.isPaused)
+        #expect(restored.remaining() > 500)
+    }
+
     @Test func expiredSessionIsNotActive() {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

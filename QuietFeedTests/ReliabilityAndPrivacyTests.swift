@@ -195,6 +195,28 @@ private func makeDefaults() -> (UserDefaults, String) {
 }
 
 @Suite struct LauncherLinkTests {
+    @Test func bundledRegistryIsSafeAndComplete() {
+        let platforms = BundledRuleProvider.loadNow().platforms
+        let required = Set(["youtube", "youtube_music", "netflix", "amazon_prime", "spotify", "instagram"])
+        #expect(required.isSubset(of: Set(platforms.map(\.id))))
+        #expect(Set(platforms.map(\.id)).count == platforms.count)
+        for platform in platforms {
+            #expect(platform.baseUrl.scheme == "https")
+            #expect(platform.baseUrl.host.map { host in
+                platform.allowedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+            } == true)
+        }
+    }
+
+    @Test func launchMetadataUsesSafeWebFirstBehavior() throws {
+        let platforms = BundledRuleProvider.loadNow().platforms
+        let prime = try #require(platforms.first { $0.id == "amazon_prime" })
+        let youtube = try #require(platforms.first { $0.id == "youtube" })
+        #expect(prime.preferredLaunchMethod == .websiteWithAppFallback)
+        #expect(youtube.preferredLaunchMethod == .embeddedWebsite)
+        #expect(platforms.allSatisfy { $0.deepLinkBehavior == .quietFeedRoute })
+    }
+
     @Test func openLinksNameThePlatform() {
         #expect(LauncherSnapshot.platformID(from: URL(string: "quietfeed://open/youtube")!) == "youtube")
         #expect(LauncherSnapshot.platformID(from: URL(string: "quietfeed://open/amazon_prime")!) == "amazon_prime")

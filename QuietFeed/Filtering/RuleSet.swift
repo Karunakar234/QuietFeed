@@ -2,6 +2,16 @@ import Foundation
 
 /// A platform Stillfeed can open. Decoded from rules.json (snake_case keys).
 struct Platform: Codable, Identifiable, Hashable {
+    enum LaunchMethod: String, Codable {
+        case embeddedWebsite
+        case websiteWithAppFallback
+    }
+
+    enum DeepLinkBehavior: String, Codable {
+        case quietFeedRoute
+        case providerWebsiteOnly
+    }
+
     let id: String
     let name: String
     let baseUrl: URL
@@ -9,6 +19,18 @@ struct Platform: Codable, Identifiable, Hashable {
     let symbol: String
     let tagline: String?
     let isPro: Bool
+
+    /// QuietFeed always tries the supported website first. Services known to restrict some
+    /// WebKit playback clearly advertise that their official app may be required.
+    var preferredLaunchMethod: LaunchMethod {
+        let appFallbackPlatforms: Set<String> = [
+            "netflix", "amazon_prime", "hbo_max", "disney_plus", "hulu",
+            "paramount_plus", "peacock"
+        ]
+        return appFallbackPlatforms.contains(id) ? .websiteWithAppFallback : .embeddedWebsite
+    }
+
+    var deepLinkBehavior: DeepLinkBehavior { .quietFeedRoute }
 }
 
 /// One filter rule. Rules are data: selectors, patterns and an action from a fixed set.

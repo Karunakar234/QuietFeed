@@ -294,6 +294,21 @@ struct PlatformArt {
         case "spotify":
             return PlatformArt(highlights: "Music\u{00A0}• Playlists", iconColor: Neon.glow,
                                artColors: [Neon.teal, Neon.navy])
+        case "hbo_max":
+            return PlatformArt(highlights: "HBO\u{00A0}• Max Originals", iconColor: Neon.violet,
+                               artColors: [Neon.violet, Neon.navy])
+        case "disney_plus":
+            return PlatformArt(highlights: "Disney\u{00A0}• Marvel", iconColor: Neon.blue,
+                               artColors: [Neon.blue, Neon.navy])
+        case "hulu":
+            return PlatformArt(highlights: "Shows\u{00A0}• Movies", iconColor: Neon.glow,
+                               artColors: [Neon.glow, Neon.teal])
+        case "paramount_plus":
+            return PlatformArt(highlights: "Movies\u{00A0}• Live TV", iconColor: Neon.blue,
+                               artColors: [Neon.blue, Neon.violet])
+        case "peacock":
+            return PlatformArt(highlights: "Shows\u{00A0}• Sports", iconColor: Neon.orange,
+                               artColors: [Neon.orange, Neon.violet])
         default:
             return PlatformArt(highlights: "", iconColor: Neon.glow,
                                artColors: [Neon.violet, Neon.blue])

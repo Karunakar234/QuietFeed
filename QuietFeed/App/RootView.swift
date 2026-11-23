@@ -1,5 +1,8 @@
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 #if os(macOS)
 import AppKit
 #endif
@@ -81,6 +84,13 @@ struct RootView: View {
             openRequestedPlatform()
             await appLock.promptIfNeeded()
         }
+        #if canImport(UIKit)
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.didReceiveMemoryWarningNotification) {
+                session.handleMemoryWarning()
+            }
+        }
+        #endif
         .onChange(of: intentRouter.pendingPlatformID) { _, _ in openRequestedPlatform() }
         .onChange(of: didOnboard) { _, _ in openRequestedPlatform() }
         .onChange(of: launcherSignature) { _, _ in publishLauncher() }
@@ -105,11 +115,7 @@ struct RootView: View {
     }
 
     private var preferredColorScheme: ColorScheme? {
-        switch appearanceMode {
-        case "light": .light
-        case "dark": .dark
-        default: nil
-        }
+        appearanceMode == "light" ? .light : nil
     }
 
     /// Opens the platform an "Open Platform" shortcut asked for, once the app is past onboarding.

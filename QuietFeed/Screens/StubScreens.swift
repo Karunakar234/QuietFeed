@@ -34,6 +34,15 @@ struct BlockingScreen: View {
                     .buttonStyle(.app(.secondary, .md))
 
                     if focus.isActive {
+                        Button("Pause session", systemImage: "pause.fill") { focus.pause() }
+                            .buttonStyle(.app(.secondary, .md))
+                        Button("End focus session", role: .destructive) { focus.stop() }
+                            .buttonStyle(.app(.danger, .md))
+                    } else if focus.isPaused {
+                        Button("Resume session", systemImage: "play.fill") {
+                            Task { await focus.resume() }
+                        }
+                        .buttonStyle(.app(.primary, .md))
                         Button("End focus session", role: .destructive) { focus.stop() }
                             .buttonStyle(.app(.danger, .md))
                     }
@@ -173,6 +182,13 @@ private struct FocusStatusCard: View {
                         .accessibilityAddTraits(.updatesFrequently)
                 }
                 Text("Session continues correctly while the app is backgrounded because it uses its saved end time.")
+                    .font(TypeRole.footnote)
+                    .foregroundStyle(Theme.color.textMuted)
+            } else if focus.isPaused {
+                Text(Duration.seconds(focus.remaining()), format: .time(pattern: .minuteSecond))
+                    .font(TypeRole.stat)
+                    .foregroundStyle(Neon.glow)
+                Text("Session paused")
                     .font(TypeRole.footnote)
                     .foregroundStyle(Theme.color.textMuted)
             } else {
@@ -330,12 +346,21 @@ struct SettingsScreen: View {
         NavigationStack {
             Form {
                 ThemedSection("Appearance") {
-                    Picker("Appearance", selection: $appearanceMode) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
+                    Toggle(isOn: lightModeBinding) {
+                        Label {
+                            VStack(alignment: .leading, spacing: Space.s4) {
+                                Text("Light Mode")
+                                Text(appearanceMode == "light"
+                                     ? "Always use a light appearance"
+                                     : "Following System Appearance")
+                                    .font(TypeRole.footnote)
+                                    .foregroundStyle(Theme.color.textMuted)
+                            }
+                        } icon: {
+                            Image(systemName: appearanceMode == "light" ? "sun.max.fill" : "circle.lefthalf.filled")
+                                .foregroundStyle(Theme.color.accent)
+                        }
                     }
-                    .pickerStyle(.segmented)
                 }
 
                 ThemedSection("Content") {
@@ -451,6 +476,13 @@ struct SettingsScreen: View {
                 deleteAction: { Task { await deleteEverything() } }
             )
         }
+    }
+
+    private var lightModeBinding: Binding<Bool> {
+        Binding(
+            get: { appearanceMode == "light" },
+            set: { appearanceMode = $0 ? "light" : "system" }
+        )
     }
 
     /// Puts QuietFeed back the way it was on first launch: signs out of every platform by deleting
@@ -590,22 +622,48 @@ private struct SettingsPlatformsCard: View {
     let settings: [PlatformSetting]
     @Environment(RuleStore.self) private var ruleStore
 
+    private var orderedSettings: [PlatformSetting] {
+        settings.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     var body: some View {
         GlassSectionCard("Platforms", symbol: "square.grid.2x2.fill") {
             VStack(spacing: 0) {
-                ForEach(settings) { setting in
+                ForEach(orderedSettings) { setting in
                     if let platform = ruleStore.platform(id: setting.platformID) {
-                        ToggleRow(
-                            title: platform.name,
-                            subtitle: platform.tagline,
-                            isOn: Binding(
+                        HStack(spacing: Space.s12) {
+                            VStack(alignment: .leading, spacing: Space.s4) {
+                                Text(platform.name)
+                                    .font(TypeRole.body)
+                                    .foregroundStyle(Theme.color.text)
+                                if let tagline = platform.tagline {
+                                    Text(tagline)
+                                        .font(TypeRole.footnote)
+                                        .foregroundStyle(Theme.color.textMuted)
+                                }
+                            }
+                            Spacer()
+                            Menu {
+                                Button("Move earlier", systemImage: "arrow.up") { move(setting, by: -1) }
+                                    .disabled(isFirst(setting))
+                                Button("Move later", systemImage: "arrow.down") { move(setting, by: 1) }
+                                    .disabled(isLast(setting))
+                            } label: {
+                                Image(systemName: "arrow.up.arrow.down")
+                                    .frame(width: Layout.minTap, height: Layout.minTap)
+                            }
+                            .accessibilityLabel("Reorder \(platform.name)")
+                            Toggle("Show \(platform.name) on Home", isOn: Binding(
                                 get: { setting.isEnabled },
                                 set: { setting.isEnabled = $0 }
-                            )
-                        )
+                            ))
+                            .labelsHidden()
+                            .tint(Theme.color.accent)
+                        }
+                        .frame(minHeight: Layout.minTap)
                         .padding(.vertical, Space.s8)
 
-                        if setting.id != settings.last?.id {
+                        if setting.id != orderedSettings.last?.id {
                             Divider()
                                 .foregroundStyle(Theme.color.border)
                         }
@@ -613,6 +671,18 @@ private struct SettingsPlatformsCard: View {
                 }
             }
         }
+    }
+
+    private func isFirst(_ setting: PlatformSetting) -> Bool { orderedSettings.first?.id == setting.id }
+    private func isLast(_ setting: PlatformSetting) -> Bool { orderedSettings.last?.id == setting.id }
+
+    private func move(_ setting: PlatformSetting, by offset: Int) {
+        let ordered = orderedSettings
+        guard let source = ordered.firstIndex(where: { $0.id == setting.id }) else { return }
+        let destination = source + offset
+        guard ordered.indices.contains(destination) else { return }
+        let other = ordered[destination]
+        (setting.sortOrder, other.sortOrder) = (other.sortOrder, setting.sortOrder)
     }
 }
 
