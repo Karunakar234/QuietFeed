@@ -94,10 +94,17 @@ struct PlatformTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: Space.s8) {
                 HStack {
-                    Image(systemName: symbol).font(.title2).foregroundStyle(Theme.color.accent)
+                    Image(systemName: symbol)
+                        .font(.title2)
+                        .foregroundStyle(Theme.color.accent)
+                        .accessibilityHidden(true)
                     Spacer()
                     if state == .locked { ProBadge() }
-                    if isSelected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.color.accent) }
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.color.accent)
+                            .accessibilityHidden(true)
+                    }
                 }
                 Spacer(minLength: Space.s12)
                 Text(name)
@@ -178,7 +185,9 @@ struct PlanCard: View {
         Button(action: action) {
             HStack(spacing: Space.s12) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .font(.title3).foregroundStyle(isSelected ? Theme.color.accent : Theme.color.borderInput)
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Theme.color.accent : Theme.color.borderInput)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Space.s4) {
                     HStack {
                         Text(title).font(TypeRole.headline)
@@ -231,7 +240,7 @@ struct WebStateOverlay: View {
             EmptyView()
         case .offline:
             EmptyState(symbol: "wifi.slash", title: "You're offline",
-                       message: "Reconnect and try again. Your filters stay on.",
+                       message: "The page reloads by itself when you're back online. Your filters stay on.",
                        actionTitle: "Try again", action: retry)
         case .error(let msg):
             EmptyState(symbol: "exclamationmark.triangle", title: "Page didn't load",
@@ -253,6 +262,8 @@ struct WebTopBar: View {
     let title: String
     var accountLabel: String? = nil
     var showsBack = false
+    /// The page is a single item someone sent, so Back returns to the chat it came from.
+    var backReturnsToChat = false
     var onClose: (() -> Void)? = nil
     var onPost: (() -> Void)? = nil
     var onMinimize: (() -> Void)? = nil
@@ -260,56 +271,57 @@ struct WebTopBar: View {
     var onAccount: () -> Void = {}
     var onReload: () -> Void = {}
 
-    /// Each control is its own piece of Liquid Glass floating over the backdrop, rather than
-    /// a solid bar. Glass shapes are 36pt, inside full 44pt tap targets.
+    /// A minimal header kept apart from the page, so it never sits over the site's own controls:
+    /// Back and the platform's name on the leading side, Refresh, Mini Player and Close on the
+    /// trailing side. Account and posting live in the name's menu. Each control is its own piece
+    /// of Liquid Glass; glass shapes are 36pt, inside full 44pt tap targets.
     var body: some View {
-        GlassEffectContainer(spacing: Space.s4) {
-            HStack(spacing: Space.s8) {
-                if showsBack {
-                    glassIcon("chevron.backward", label: "Back to chat", action: onBack)
-                } else if let onClose {
-                    glassIcon("xmark", label: "Close", action: onClose)
-                }
+        HStack(spacing: Space.s4) {
+            Button(action: onBack) {
+                Label(backReturnsToChat ? "Back to chat" : "Back", systemImage: "chevron.backward")
+                    .labelStyle(.iconOnly)
+            }
+            .disabled(!showsBack)
+            .opacity(showsBack ? 1 : 0.35)
+
+            Menu {
                 Button(action: onAccount) {
-                    // Drops the account name before it ever cuts off the platform's name.
-                    ViewThatFits(in: .horizontal) {
-                        titleLabel(showingAccount: true)
-                        titleLabel(showingAccount: false)
-                    }
-                    .padding(.horizontal, Space.s12)
-                    .frame(minHeight: 36)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    .frame(minHeight: Layout.minTap)
-                    .contentShape(Rectangle())
+                    Label("Switch Account", systemImage: "person.crop.circle")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Switch account")
-                // The title takes the free space before the spacer does.
-                .layoutPriority(1)
-                Spacer(minLength: 0)
                 if let onPost {
                     Button(action: onPost) {
-                        Text("Post")
-                            .font(TypeRole.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.color.accent)
-                            .padding(.horizontal, Space.s12)
-                            .frame(minHeight: 36)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .frame(minHeight: Layout.minTap)
-                            .contentShape(Rectangle())
+                        Label("Post", systemImage: "square.and.pencil")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Opens the real app for 10 minutes")
                 }
-                if let onMinimize {
-                    glassIcon("pip.enter", label: "Shrink to mini player", action: onMinimize)
+            } label: {
+                ViewThatFits(in: .horizontal) {
+                    titleLabel(showingAccount: true)
+                    titleLabel(showingAccount: false)
                 }
-                glassIcon("arrow.clockwise", label: "Reload", action: onReload)
+            }
+            .accessibilityLabel(accountLabel.map { "\(title), \($0)" } ?? title)
+            .accessibilityHint("Account and posting options")
+            .layoutPriority(1)
+
+            Spacer(minLength: 0)
+
+            Button("Refresh", systemImage: "arrow.clockwise", action: onReload)
+                .labelStyle(.iconOnly)
+            if let onMinimize {
+                Button("Shrink to mini player", systemImage: "pip.enter", action: onMinimize)
+                    .labelStyle(.iconOnly)
+            }
+            if let onClose {
+                Button("Close \(title)", systemImage: "xmark", action: onClose)
+                    .labelStyle(.iconOnly)
             }
         }
         .foregroundStyle(Theme.color.text)
-        .padding(.horizontal, Space.s8)
-        .frame(height: Layout.webTopBar + Space.s8)
+        .buttonStyle(.borderless)
+        .controlSize(.large)
+        .padding(.horizontal, Space.s12)
+        .frame(minHeight: Layout.webTopBar + Space.s8)
+        .background(.bar)
     }
 
     private func titleLabel(showingAccount: Bool) -> some View {
@@ -318,23 +330,13 @@ struct WebTopBar: View {
             if showingAccount, let accountLabel {
                 Text("· \(accountLabel)").font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
             }
-            Image(systemName: "chevron.down").font(.caption2)
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .accessibilityHidden(true)
         }
         .lineLimit(1)
     }
 
-    private func glassIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(TypeRole.body.weight(.semibold))
-                .frame(width: 36, height: 36)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .frame(width: Layout.minTap, height: Layout.minTap)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
 }
 
 // MARK: - Countdown (S11, Live Activity uses the same layout)
@@ -345,35 +347,35 @@ struct CountdownView: View {
 
     var body: some View {
         VStack(spacing: Space.s4) {
-            Text(label).font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
-            Text(timerInterval: Date.now...max(endsAt, Date.now), countsDown: true)
-                .font(TypeRole.stat).foregroundStyle(Theme.color.text)
-                .contentTransition(.numericText(countsDown: true))
+            Text(label.uppercased()).font(TypeRole.caption).foregroundStyle(Theme.color.textMuted)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let remaining = max(0, Int(endsAt.timeIntervalSince(context.date)))
+                Text(String(format: "%02d:%02d", remaining / 60, remaining % 60))
+                    .font(TypeRole.stat)
+                    .foregroundStyle(remaining < 60 ? Theme.color.danger : Theme.color.accent)
+                    .monospacedDigit()
+            }
         }
+        .padding(Space.s16)
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label), time remaining")
     }
 }
 
-// MARK: - Stat card (S06, S14)
+// MARK: - Stat card (S10)
 
 struct StatCard: View {
     let title: String
-    let value: String?          // nil = no data yet
+    let value: String?
     var delta: String? = nil
-    var deltaIsGood = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             Text(title).font(TypeRole.footnote).foregroundStyle(Theme.color.textMuted)
-            if let value {
-                Text(value).font(TypeRole.stat).foregroundStyle(Theme.color.text)
-                if let delta {
-                    Text(delta).font(TypeRole.caption)
-                        .foregroundStyle(deltaIsGood ? Theme.color.success : Theme.color.danger)
-                }
-            } else {
-                Text("No data yet").font(TypeRole.body).foregroundStyle(Theme.color.textMuted)
+            Text(value ?? "—").font(TypeRole.stat).foregroundStyle(Theme.color.text)
+            if let delta {
+                Text(delta).font(TypeRole.caption).foregroundStyle(Theme.color.accent)
             }
         }
         .padding(Space.s16)
@@ -383,9 +385,9 @@ struct StatCard: View {
     }
 }
 
-// MARK: - Banner / toast
+// MARK: - Banner (S15)
 
-enum BannerKind { case info, success, warning, error }
+enum BannerKind { case info, warning, success, error }
 
 struct Banner: View {
     let kind: BannerKind
@@ -396,11 +398,12 @@ struct Banner: View {
     private var tint: Color {
         switch kind {
         case .info: Theme.color.accent
-        case .success: Theme.color.success
         case .warning: Theme.color.warning
+        case .success: Theme.color.success
         case .error: Theme.color.danger
         }
     }
+
     private var symbol: String {
         switch kind {
         case .info: "info.circle.fill"
@@ -412,7 +415,9 @@ struct Banner: View {
 
     var body: some View {
         HStack(spacing: Space.s8) {
-            Image(systemName: symbol).foregroundStyle(tint)
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
             Text(text).font(TypeRole.footnote).foregroundStyle(Theme.color.text)
             Spacer(minLength: 0)
             if let actionTitle {
@@ -496,7 +501,8 @@ struct DesignGallery: View {
                     Banner(kind: .error, text: "Purchase failed")
                 }
                 section("Web chrome & states") {
-                    WebTopBar(title: "Instagram", accountLabel: "personal", showsBack: true)
+                    WebTopBar(title: "Instagram", accountLabel: "personal", showsBack: true,
+                              backReturnsToChat: true, onClose: {}, onMinimize: {})
                     EmptyState(symbol: "wifi.slash", title: "You're offline", message: "Reconnect and try again.", actionTitle: "Try again")
                 }
             }
@@ -516,3 +522,37 @@ struct DesignGallery: View {
 #Preview("Light") { DesignGallery() }
 #Preview("Dark") { DesignGallery().preferredColorScheme(.dark) }
 #Preview("XXL text") { DesignGallery().dynamicTypeSize(.accessibility2) }
+
+// MARK: - Form sections
+
+/// A Form section whose header and footer use the theme's muted text colour. The system's
+/// section grey is about 3.3:1 on the grouped background in Light mode, below the 4.5:1
+/// WCAG AA asks for; `textMuted` is 5.88:1.
+struct ThemedSection<Content: View>: View {
+    private let header: Text
+    private let footer: Text?
+    private let content: Content
+
+    init(_ title: LocalizedStringKey, footer: LocalizedStringKey? = nil, @ViewBuilder content: () -> Content) {
+        self.header = Text(title)
+        self.footer = footer.map { Text($0) }
+        self.content = content()
+    }
+
+    /// For titles that are data, such as a platform's name.
+    init<S: StringProtocol>(verbatim title: S, @ViewBuilder content: () -> Content) {
+        self.header = Text(title)
+        self.footer = nil
+        self.content = content()
+    }
+
+    var body: some View {
+        Section {
+            content
+        } header: {
+            header.foregroundStyle(Theme.color.textMuted)
+        } footer: {
+            if let footer { footer.foregroundStyle(Theme.color.textMuted) }
+        }
+    }
+}

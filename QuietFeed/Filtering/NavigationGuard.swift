@@ -15,8 +15,10 @@ struct NavigationGuard {
 
     func decide(url: URL, isMainFrame: Bool) -> Decision {
         let scheme = url.scheme?.lowercased() ?? ""
-        if ["about", "blob", "data"].contains(scheme) { return .allow }
-        guard scheme == "https" || scheme == "http" else { return .cancel }
+        if scheme == "about" { return url.absoluteString == "about:blank" ? .allow : .cancel }
+        if ["blob", "data"].contains(scheme) { return isMainFrame ? .cancel : .allow }
+        // Platform sessions and credentials must never be sent over a downgraded connection.
+        guard scheme == "https" else { return .cancel }
         guard isMainFrame else { return .allow }
         guard let host = url.host?.lowercased(), isAllowed(host: host) else { return .external(url) }
         guard isPlatformHost(host) else { return .allow }
@@ -50,6 +52,12 @@ struct NavigationGuard {
 
     private func isAllowed(host: String) -> Bool {
         platform.allowedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// Script messages may affect native UI and usage totals, so only the platform's own
+    /// top-level document is trusted to send them.
+    func isTrustedMessageOrigin(host: String, isMainFrame: Bool) -> Bool {
+        isMainFrame && isAllowed(host: host.lowercased())
     }
 
     private func isPlatformHost(_ host: String) -> Bool {

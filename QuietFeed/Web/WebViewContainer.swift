@@ -8,7 +8,14 @@ struct WebViewContainer: UIViewRepresentable {
     let model: WebModel
 
     func makeUIView(context: Context) -> WKWebView {
-        model.webView.scrollView.refreshControl?.tintColor = UIColor(Theme.color.accent)
+        let scrollView = model.webView.scrollView
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.contentInset = .zero
+        scrollView.scrollIndicatorInsets = .zero
+        scrollView.automaticallyAdjustsScrollIndicatorInsets = false
+        scrollView.isDirectionalLockEnabled = true
+        scrollView.scrollsToTop = true
+        scrollView.refreshControl?.tintColor = UIColor(Theme.color.accent)
         return model.webView
     }
     func updateUIView(_ uiView: WKWebView, context: Context) {}

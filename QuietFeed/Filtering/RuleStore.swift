@@ -9,6 +9,12 @@ protocol RuleProviding {
 
 struct BundledRuleProvider: RuleProviding {
     func loadRules() async -> RuleSet {
+        Self.loadNow()
+    }
+
+    /// Reads the bundled rules straight away. The file is small, so the app can have its
+    /// rules before the first frame and open on Home instead of a loading screen.
+    static func loadNow() -> RuleSet {
         guard let url = Bundle.main.url(forResource: "rules", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let set = try? JSONDecoder.rules.decode(RuleSet.self, from: data) else {
@@ -25,11 +31,14 @@ final class RuleStore {
     private let provider: RuleProviding
     private(set) var ruleSet: RuleSet?
 
-    init(provider: RuleProviding) {
+    /// `preloaded` lets the app start with rules already in hand (no loading screen).
+    init(provider: RuleProviding, preloaded: RuleSet? = nil) {
         self.provider = provider
+        self.ruleSet = preloaded
     }
 
     func load() async {
+        guard ruleSet == nil else { return }
         ruleSet = await provider.loadRules()
     }
 
@@ -46,10 +55,11 @@ final class RuleStore {
 
     /// One switch per key, in file order.
     func toggles(for platformID: String) -> [RuleToggle] {
+        let platformRules = rules(for: platformID)
         var seen = Set<String>()
         var out: [RuleToggle] = []
-        for rule in rules(for: platformID) where seen.insert(rule.key).inserted {
-            let detail = rules(for: platformID).first { $0.key == rule.key && $0.detail != nil }?.detail
+        for rule in platformRules where seen.insert(rule.key).inserted {
+            let detail = platformRules.first { $0.key == rule.key && $0.detail != nil }?.detail
             out.append(RuleToggle(key: rule.key, title: rule.title, detail: detail, isPro: rule.isPro, defaultOn: rule.defaultOn))
         }
         return out

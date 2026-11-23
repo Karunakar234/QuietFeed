@@ -41,7 +41,7 @@ struct ContentView: View {
             }
         }
         .alert(
-            "App not available",
+            unavailableTitle,
             isPresented: Binding(
                 get: { unavailablePlatform != nil },
                 set: { if !$0 { unavailablePlatform = nil } }
@@ -50,8 +50,24 @@ struct ContentView: View {
         ) { _ in
             Button("OK", role: .cancel) {}
         } message: { platform in
-            Text("Install \(platform.name) from the Apple TV App Store, then try again.")
+            Text(unavailableMessage(for: platform))
         }
+    }
+
+    private var unavailableTitle: LocalizedStringResource {
+        #if targetEnvironment(simulator)
+        "Requires a physical Apple TV"
+        #else
+        "App not available"
+        #endif
+    }
+
+    private func unavailableMessage(for platform: TVPlatform) -> LocalizedStringResource {
+        #if targetEnvironment(simulator)
+        "The Apple TV simulator cannot install or open \(platform.name). Run QuietFeedTV on a paired physical Apple TV with \(platform.name) installed."
+        #else
+        "Install \(platform.name) from the Apple TV App Store, then try again."
+        #endif
     }
 
     private var header: some View {
@@ -61,6 +77,7 @@ struct ContentView: View {
                 .foregroundStyle(.mint)
                 .frame(width: 88, height: 88)
                 .glassEffect(.regular, in: .rect(cornerRadius: 24))
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("QuietFeed")
@@ -86,9 +103,11 @@ struct ContentView: View {
                     Image(systemName: platform.symbol)
                         .font(.system(size: 38, weight: .semibold))
                         .foregroundStyle(platform.tint)
+                        .accessibilityHidden(true)
                     Spacer()
                     Image(systemName: "arrow.up.forward.app.fill")
                         .foregroundStyle(.white.opacity(0.7))
+                        .accessibilityHidden(true)
                 }
                 Spacer(minLength: 20)
                 Text(platform.name)
@@ -105,6 +124,8 @@ struct ContentView: View {
             .glassEffect(.regular.tint(platform.tint.opacity(0.16)).interactive(), in: .rect(cornerRadius: 28))
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(platform.name), \(platform.detail)")
         .accessibilityHint("Opens the installed \(platform.name) app")
     }
 }
@@ -120,7 +141,9 @@ private struct TVPlatform: Identifiable {
     static let all: [TVPlatform] = [
         TVPlatform(id: "youtube", name: "YouTube", detail: "Videos, channels, and live content", symbol: "play.rectangle.fill", tint: .red, url: URL(string: "https://www.youtube.com/tv")!),
         TVPlatform(id: "youtube_music", name: "YouTube Music", detail: "Music through the YouTube experience", symbol: "music.note.tv.fill", tint: .pink, url: URL(string: "https://music.youtube.com")!),
-        TVPlatform(id: "prime_video", name: "Prime Video", detail: "Movies and series in the Prime Video app", symbol: "play.tv.fill", tint: .cyan, url: URL(string: "https://www.primevideo.com")!)
+        TVPlatform(id: "netflix", name: "Netflix", detail: "Movies, series, and Netflix originals", symbol: "film.stack.fill", tint: .red, url: URL(string: "https://www.netflix.com")!),
+        TVPlatform(id: "amazon_prime", name: "Prime Video", detail: "Movies and series in the Prime Video app", symbol: "play.tv.fill", tint: .cyan, url: URL(string: "https://www.primevideo.com")!),
+        TVPlatform(id: "spotify", name: "Spotify", detail: "Music, podcasts, and playlists", symbol: "music.note.list", tint: .green, url: URL(string: "https://open.spotify.com")!)
     ]
 }
 

@@ -28,7 +28,7 @@ struct OnboardingFlow: View {
         .padding(.vertical, Space.s16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { AuroraBackground() }
-        .animation(Motion.spring, value: step)
+        .animation(Motion.gentle, value: step)
     }
 }
 
@@ -52,11 +52,11 @@ private struct WelcomeScreen: View {
                         VStack(alignment: .leading, spacing: Space.s8) {
                             Text("Keep your people. Skip the pull.")
                                 .font(TypeRole.display)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Theme.color.text)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("Instagram and YouTube, without Reels, Shorts or the feed of strangers.")
                                 .font(TypeRole.body)
-                                .foregroundStyle(.white.opacity(0.72))
+                                .foregroundStyle(Theme.color.textMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -92,18 +92,19 @@ private struct PickPlatformsScreen: View {
                     HStack(spacing: Space.s12) {
                         Image(systemName: "checklist")
                             .font(.title2.weight(.semibold))
-                            .foregroundStyle(Neon.teal)
+                            .foregroundStyle(Neon.glow)
                             .frame(width: 52, height: 52)
                             .glassEffect(.regular, in: .rect(cornerRadius: Radius.md))
+                            .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: Space.s4) {
                             Text("Choose your platforms")
                                 .font(TypeRole.title)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Theme.color.text)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("You can change this any time.")
                                 .font(TypeRole.body)
-                                .foregroundStyle(.white.opacity(0.68))
+                                .foregroundStyle(Theme.color.textMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -138,10 +139,11 @@ private struct PickPlatformsScreen: View {
         }
     }
 }
+// The previews use the bundled rules and a settings row per platform (as the app seeds them at
+// launch); without those the platform grid had nothing to show.
 #Preview("Welcome") {
     OnboardingFlow {}
-        .environment(RuleStore(provider: BundledRuleProvider()))
-        .modelContainer(for: [PlatformSetting.self, Account.self], inMemory: true)
+        .previewEnvironment(enabledCount: 0)
 }
 
 #Preview("Pick Platforms") {
@@ -151,7 +153,5 @@ private struct PickPlatformsScreen: View {
         .padding(.vertical, Space.s16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { AuroraBackground() }
-        .environment(RuleStore(provider: BundledRuleProvider()))
-        .modelContainer(for: [PlatformSetting.self, Account.self], inMemory: true)
+        .previewEnvironment(enabledCount: 2)
 }
-

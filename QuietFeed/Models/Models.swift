@@ -8,6 +8,10 @@ final class PlatformSetting {
     var isEnabled: Bool
     var ruleToggles: [String: Bool]
     var sortOrder: Int
+    /// Starred on Home; favourites sort ahead of the rest. Defaults keep existing stores migrating cleanly.
+    var isFavorite: Bool = false
+    /// When the platform was last opened, for Home's "Jump back in" row.
+    var lastOpenedAt: Date? = nil
 
     init(platformID: String, isEnabled: Bool = false, ruleToggles: [String: Bool] = [:], sortOrder: Int = 0) {
         self.platformID = platformID
