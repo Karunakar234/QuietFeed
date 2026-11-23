@@ -19,6 +19,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("didOnboard", false)
         set(value) = prefs.edit().putBoolean("didOnboard", value).apply()
 
+    /** The one-time remote tip on a platform screen. */
+    var sawTvTip: Boolean
+        get() = prefs.getBoolean("sawTvTip", false)
+        set(value) = prefs.edit().putBoolean("sawTvTip", value).apply()
+
     fun isEnabled(platformId: String): Boolean = prefs.getBoolean("enabled.$platformId", false)
 
     fun setEnabled(platformId: String, enabled: Boolean) {

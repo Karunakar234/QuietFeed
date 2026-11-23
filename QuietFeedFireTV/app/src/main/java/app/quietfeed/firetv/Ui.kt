@@ -30,6 +30,9 @@ object Ui {
         "youtube" -> Color.parseColor("#FF4E45")
         "youtube_music" -> Color.parseColor("#FF5C9A")
         "instagram" -> Color.parseColor("#C77DFF")
+        "netflix" -> Color.parseColor("#E50914")
+        "amazon_prime" -> Color.parseColor("#1FB6FF")
+        "spotify" -> Color.parseColor("#1ED760")
         else -> ACCENT
     }
 
@@ -37,6 +40,9 @@ object Ui {
         "youtube" -> "▶"
         "youtube_music" -> "♪"
         "instagram" -> "◎"
+        "netflix" -> "N"
+        "amazon_prime" -> "▷"
+        "spotify" -> "≋"
         else -> "●"
     }
 }
@@ -118,4 +124,31 @@ fun match() = ViewGroup.LayoutParams.MATCH_PARENT
 fun LinearLayout.add(view: View, width: Int = match(), height: Int = wrap(), weight: Float = 0f): View {
     addView(view, LinearLayout.LayoutParams(width, height, weight))
     return view
+}
+
+/** A row with a title, a detail line and an On/Off pill. Selecting it flips the switch. */
+fun Context.switchRow(title: String, detail: String?, isOn: () -> Boolean, onChange: (Boolean) -> Unit): View {
+    val state = text("", 16f, bold = true).apply {
+        gravity = Gravity.CENTER
+        setPadding(dp(18), dp(6), dp(18), dp(6))
+    }
+    fun render() {
+        val on = isOn()
+        state.text = if (on) "On" else "Off"
+        state.setTextColor(if (on) Ui.ON_ACCENT else Ui.TEXT_MUTED)
+        state.background = rounded(if (on) Ui.ACCENT else Ui.SURFACE_RAISED, 999, Ui.BORDER, if (on) 0 else 1)
+    }
+    val row = horizontal(16) {
+        gravity = Gravity.CENTER_VERTICAL
+        background = focusBackground(16)
+        setPadding(dp(24), dp(16), dp(24), dp(16))
+        add(vertical {
+            add(text(title, 20f, bold = true))
+            detail?.let { add(text(it, 15f, Ui.TEXT_MUTED)) }
+        }, 0, wrap(), 1f)
+        add(state, wrap())
+    }
+    row.makeFocusable(1.02f) { onChange(!isOn()); render() }
+    render()
+    return row
 }

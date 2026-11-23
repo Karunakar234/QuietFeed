@@ -3,6 +3,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The Fire TV apps QuietFeed opens for Netflix, Prime Video and Spotify (Android 11+ needs these listed). -->
+    <queries>
+        <package android:name="com.netflix.ninja" />
+        <package android:name="com.amazon.avod" />
+        <package android:name="com.spotify.tv.android" />
+    </queries>
+
     <!-- A TV app: no touchscreen, works with the remote. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />

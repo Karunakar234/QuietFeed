@@ -20,8 +20,10 @@ class NavigationGuard(private val platform: Platform, private val rules: List<Fi
 
     fun decide(url: Uri, isMainFrame: Boolean): Decision {
         val scheme = url.scheme?.lowercase().orEmpty()
-        if (scheme in setOf("about", "blob", "data")) return Decision.Allow
-        if (scheme != "https" && scheme != "http") return Decision.Cancel
+        if (scheme == "about") return if (url.toString() == "about:blank") Decision.Allow else Decision.Cancel
+        if (scheme == "blob" || scheme == "data") return if (isMainFrame) Decision.Cancel else Decision.Allow
+        // Platform sessions and credentials must never be sent over a downgraded connection.
+        if (scheme != "https") return Decision.Cancel
         if (!isMainFrame) return Decision.Allow
         val host = url.host?.lowercase() ?: return Decision.External(url.toString())
         if (!isAllowed(host)) return Decision.External(url.toString())
@@ -48,6 +50,17 @@ class NavigationGuard(private val platform: Platform, private val rules: List<Fi
         val path = pathAndQuery(url)
         return rules.any { it.action == FilterRule.DISABLE_SCROLL && firstMatch(it.urlPatterns, path) != null }
     }
+
+    /**
+     * Script messages affect usage totals, so only the platform's own top-level document is
+     * trusted to send them.
+     */
+    fun isTrustedMessageOrigin(host: String, isMainFrame: Boolean): Boolean =
+        isMainFrame && isAllowed(host.lowercase())
+
+    /** Origin rules for the web message listener: each allowed host and its subdomains, https only. */
+    fun messageOriginRules(): Set<String> =
+        platform.allowedHosts.flatMap { listOf("https://$it", "https://*.$it") }.toSet()
 
     private fun isAllowed(host: String) =
         platform.allowedHosts.any { host == it || host.endsWith(".$it") }

@@ -90,8 +90,8 @@ class MainActivity : Activity() {
     }
 
     private fun pickPlatforms(): View = centered {
-        add(text("Choose your platforms", 40f, bold = true))
-        add(text("You can change this any time.", 20f, Ui.TEXT_MUTED).apply { setPadding(0, dp(8), 0, dp(32)) })
+        add(text("Choose your platforms", 34f, bold = true))
+        add(text("You can change this any time.", 20f, Ui.TEXT_MUTED).apply { setPadding(0, dp(6), 0, dp(24)) })
         val continueButton = pillButton("Continue", primary = true) {
             if (picked.isEmpty()) return@pillButton
             store.platforms.forEach { prefs.setEnabled(it.id, it.id in picked) }
@@ -99,18 +99,16 @@ class MainActivity : Activity() {
             show(Screen.HOME)
         }
         fun refreshContinue() { continueButton.alpha = if (picked.isEmpty()) 0.4f else 1f }
-        add(horizontal(24) {
-            store.platforms.forEach { platform ->
-                val card = platformCard(platform, selectable = true, selected = platform.id in picked)
-                card.makeFocusable {
-                    if (!picked.add(platform.id)) picked.remove(platform.id)
-                    (card.tag as TextView).text = checkLabel(platform.id in picked)
-                    refreshContinue()
-                }
-                add(card, dp(260), dp(200))
+        add(grid(store.platforms, columns = 3, spacingDp = 24) { platform ->
+            val card = platformCard(platform, selectable = true, selected = platform.id in picked, compact = true)
+            card.makeFocusable {
+                if (!picked.add(platform.id)) picked.remove(platform.id)
+                (card.tag as TextView).text = checkLabel(platform.id in picked)
+                refreshContinue()
             }
+            card to Pair(dp(250), dp(128))
         })
-        add(horizontal { setPadding(0, dp(40), 0, 0); add(continueButton, wrap()) })
+        add(horizontal { setPadding(0, dp(28), 0, 0); add(continueButton, wrap()) })
         refreshContinue()
     }
 
@@ -158,16 +156,14 @@ class MainActivity : Activity() {
         if (enabled.isEmpty()) {
             add(text("No platforms on your home screen yet. Turn some on in Settings.", 20f, Ui.TEXT_MUTED))
         } else {
-            add(horizontal(28) {
-                enabled.forEach { platform ->
-                    val card = platformCard(platform, selectable = false, selected = false)
-                    card.makeFocusable { open(platform) }
-                    add(card, dp(300), dp(220))
-                }
+            add(grid(enabled, columns = 3, spacingDp = 28) { platform ->
+                val card = platformCard(platform, selectable = false, selected = false)
+                card.makeFocusable { open(platform) }
+                card to Pair(dp(270), dp(170))
             })
         }
         add(insightsCard(), wrap())
-        add(text("Move with the arrows and press the center button to select. Inside a platform, the arrows move a pointer.", 16f, Ui.TEXT_MUTED))
+        add(text("Inside a platform, the arrows move between videos and buttons, OK selects, and ≡ opens the menu.", 16f, Ui.TEXT_MUTED))
     }
 
     private fun insightsCard(): View = vertical {
@@ -183,8 +179,8 @@ class MainActivity : Activity() {
 
     private fun filters(): View = vertical(32) {
         add(text("Filters", 32f, bold = true))
-        add(text("Choose what QuietFeed hides on each platform. Changes apply the next time you open it.", 18f, Ui.TEXT_MUTED))
-        store.platforms.forEach { platform ->
+        add(text("Choose what QuietFeed hides on each platform. You can also change them from a platform's menu (≡).", 18f, Ui.TEXT_MUTED))
+        store.platforms.filter { Experience.of(it.id) is Experience.InApp }.forEach { platform ->
             val toggles = store.toggles(platform.id)
             if (toggles.isEmpty()) return@forEach
             add(vertical(12) {
@@ -220,11 +216,12 @@ class MainActivity : Activity() {
 
     // MARK: Pieces
 
-    private fun platformCard(platform: Platform, selectable: Boolean, selected: Boolean): LinearLayout = vertical {
+    private fun platformCard(platform: Platform, selectable: Boolean, selected: Boolean, compact: Boolean = false): LinearLayout = vertical {
         background = focusBackground(24)
-        setPadding(dp(24), dp(22), dp(24), dp(22))
+        val pad = if (compact) 16 else 22
+        setPadding(dp(22), dp(pad), dp(22), dp(pad))
         val top = horizontal {
-            add(text(Ui.glyph(platform.id), 40f, Ui.tint(platform.id), bold = true), 0, wrap(), 1f)
+            add(text(Ui.glyph(platform.id), if (compact) 28f else 40f, Ui.tint(platform.id), bold = true), 0, wrap(), 1f)
             if (selectable) {
                 val check = text(checkLabel(selected), 18f, Ui.ACCENT, bold = true)
                 add(check, wrap())
@@ -233,38 +230,28 @@ class MainActivity : Activity() {
         }
         add(top)
         add(View(context), match(), 0, 1f)
-        add(text(platform.name, 26f, bold = true))
-        platform.tagline?.let { add(text(it, 16f, Ui.TEXT_MUTED).apply { maxLines = 2 }) }
+        add(text(platform.name, if (compact) 22f else 26f, bold = true))
+        val badge = when (Experience.of(platform.id)) {
+            is Experience.InApp -> "Filtered in QuietFeed"
+            is Experience.NativeApp -> "Opens the ${platform.name} app  ↗"
+        }
+        add(text(badge, 15f, Ui.TEXT_MUTED).apply { maxLines = 1 })
     }
+
+    /** Lays items out in rows of [columns]; [make] returns each view and its size. */
+    private fun <T> grid(items: List<T>, columns: Int, spacingDp: Int, make: (T) -> Pair<View, Pair<Int, Int>>): View =
+        vertical(spacingDp) {
+            items.chunked(columns).forEach { row ->
+                add(horizontal(spacingDp) {
+                    row.forEach { item ->
+                        val (view, size) = make(item)
+                        add(view, size.first, size.second)
+                    }
+                }, wrap())
+            }
+        }
 
     private fun checkLabel(selected: Boolean) = if (selected) "✓ On" else "Off"
-
-    /** A row with a title, a detail line and an On/Off pill. Selecting it flips the switch. */
-    private fun switchRow(title: String, detail: String?, isOn: () -> Boolean, onChange: (Boolean) -> Unit): View {
-        val state = text("", 16f, bold = true).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(18), dp(6), dp(18), dp(6))
-        }
-        fun render() {
-            val on = isOn()
-            state.text = if (on) "On" else "Off"
-            state.setTextColor(if (on) Ui.ON_ACCENT else Ui.TEXT_MUTED)
-            state.background = rounded(if (on) Ui.ACCENT else Ui.SURFACE_RAISED, 999, Ui.BORDER, if (on) 0 else 1)
-        }
-        val row = horizontal(16) {
-            gravity = Gravity.CENTER_VERTICAL
-            background = focusBackground(16)
-            setPadding(dp(24), dp(16), dp(24), dp(16))
-            add(vertical {
-                add(text(title, 20f, bold = true))
-                detail?.let { add(text(it, 15f, Ui.TEXT_MUTED)) }
-            }, 0, wrap(), 1f)
-            add(state, wrap())
-        }
-        row.makeFocusable(1.02f) { onChange(!isOn()); render() }
-        render()
-        return row
-    }
 
     private fun centered(block: LinearLayout.() -> Unit): View = FrameLayout(this).apply {
         setBackgroundColor(Ui.BG)
@@ -282,6 +269,11 @@ class MainActivity : Activity() {
     }
 
     private fun open(platform: Platform) {
+        val experience = Experience.of(platform.id)
+        if (experience is Experience.NativeApp) {
+            NativeApps.open(this, platform, experience.packageName)
+            return
+        }
         startActivity(Intent(this, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_PLATFORM, platform.id))
     }
 

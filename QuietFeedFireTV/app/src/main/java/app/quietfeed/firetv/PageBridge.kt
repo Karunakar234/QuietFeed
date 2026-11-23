@@ -9,8 +9,12 @@ import org.json.JSONObject
  * Only the "hidden" count is acted on, as in the iOS app.
  */
 class PageBridge(private val prefs: Prefs) {
+    /** Older WebViews: called through addJavascriptInterface. */
     @JavascriptInterface
-    fun postMessage(json: String) {
+    fun postMessage(json: String) = handle(json)
+
+    /** Newer WebViews deliver through a web message listener, which has already checked the origin. */
+    fun handle(json: String) {
         val message = try { JSONObject(json) } catch (e: Exception) { return }
         if (message.optString("type") == "hidden") {
             prefs.recordHidden(message.optInt("count", 0))

@@ -1,31 +1,35 @@
 # QuietFeed for Fire TV
 
-The Fire TV version of QuietFeed: Instagram, YouTube and YouTube Music on the TV, with the same filters as the iPhone app.
+The Fire TV version of QuietFeed. It works like a TV app: the remote moves a highlight between videos and buttons, choosing a video plays it full screen, and Menu (≡) opens the app menu.
 
-Unlike Apple TV, Fire TV has a web view, so this app does what the iOS app does rather than launching other apps. It runs the **same `rules.json` and `FilterEngine.js`** from `../QuietFeed/Filtering`, copied in at build time, so a rule change ships to both apps from one file.
-
-## What's in it
-
-| iOS | Fire TV |
+| Platform | On Fire TV |
 |---|---|
-| Onboarding: pick platforms | Same |
-| Home with platform cards and weekly insights | Same, with remote-friendly cards |
-| Filters per platform | Same switches, same defaults |
-| Settings: platforms, delete insights, delete all data | Same |
-| WKWebView + FilterEngine.js at document start | Android WebView + the same engine (`WebViewCompat.addDocumentStartJavaScript`) |
-| NavigationGuard (redirect Shorts, block Reels) | Ported to Kotlin: same rules, same results |
-| AdBlocker content rules | Same block list, enforced in `shouldInterceptRequest` |
-| Touch | An on-screen pointer driven by the remote |
+| YouTube | Filtered in QuietFeed. Videos open full screen with native controls |
+| YouTube Music, Instagram | Filtered in QuietFeed |
+| Netflix, Prime Video, Spotify | Opens their Fire TV app (their websites' DRM players won't run inside an app on Android), as the Apple TV version does |
 
-Not ported: multiple accounts per platform (Android's web view shares one cookie store), background audio, the mini-player, and the Blocking and Stats tabs.
+The filtered platforms run the **same `rules.json` and `FilterEngine.js`** from `../QuietFeed/Filtering`, copied in at build time, so a rule change ships to iPhone and Fire TV from one file. `NavigationGuard` is ported to Kotlin with main's hardening (https only, no top-level `blob:`/`data:`), and only the platform's own top-level page can report to the app, as on iOS.
+
+`app/src/main/assets/TvNav.js` is the Fire TV-only part: it finds everything selectable on the page, moves the highlight in the direction pressed (staying in the same row or column), scrolls to keep it in view, and skips anything the filters hid. Selecting is a real native tap, so sites treat it as a person's tap.
 
 ## Using the remote
 
-- **Arrows**: move the pointer. Hold to go faster. Push against the top or bottom edge to scroll.
-- **Center**: tap where the pointer is. Hold for a long-press.
-- **Back**: previous page, then back to QuietFeed's home.
-- **Menu (≡)**: reload.
-- **Play/Pause, Rewind, Fast-forward**: control the video. In full-screen video, left and right skip 10 seconds.
+- **Arrows**: move between videos, tabs and buttons.
+- **OK**: select. In a full-screen video: play/pause.
+- **Left / Right in full-screen video**: skip back or forward 10 seconds. **Up / Down** show the progress bar.
+- **Back**: leave full screen, then the previous page, then back to QuietFeed's home.
+- **Menu (≡)**: Home, Reload, this platform's Filters, Pointer mode (a free pointer for anything the highlight can't reach), Close.
+- **Play/Pause, Rewind, Fast-forward**: control the video.
+
+Not ported: multiple accounts per platform (Android's web view shares one cookie store), background audio, the mini-player, widgets, and the Blocking and Stats tabs.
+
+## Install without a computer
+
+Every push that changes the Fire TV app or the shared filters rebuilds it on GitHub and publishes it at:
+
+`https://github.com/Karunakar234/QuietFeed/releases/download/firetv-latest/QuietFeed-FireTV.apk`
+
+On the Fire TV, install **Downloader**, allow it under **Settings → My Fire TV → Developer options → Install unknown apps**, open that link in it and choose **Install**. Updates install over the old version.
 
 ## Build and install
 
