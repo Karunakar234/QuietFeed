@@ -65,6 +65,7 @@ class PlayerActivity : Activity() {
     private lateinit var guard: NavigationGuard
     private lateinit var engineSource: String
     private lateinit var navSource: String
+    private lateinit var viewportSource: String
     private lateinit var pageScript: String
 
     private lateinit var root: FrameLayout
@@ -109,6 +110,7 @@ class PlayerActivity : Activity() {
         guard = NavigationGuard(platform, rules)
         engineSource = asset("FilterEngine.js")
         navSource = asset(if (experience.tvInterface) "YtTv.js" else "TvNav.js")
+        viewportSource = asset("Viewport.js")
         pageScript = buildPageScript(rules)
 
         root = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
@@ -144,7 +146,8 @@ class PlayerActivity : Activity() {
         store.enabledRules("youtube", prefs.toggles("youtube")).any { it.key == Experience.HIDE_SHORTS }
 
     private fun buildPageScript(rules: List<FilterRule>): String {
-        val base = PageBridge.SHIM + "\n" + engineSource + "\n" + bootScript(RuleStore.toEngineJson(rules)) + "\n"
+        val size = viewportWidth()?.let { "window.__qfViewportWidth = $it;\n$viewportSource\n" }.orEmpty()
+        val base = size + PageBridge.SHIM + "\n" + engineSource + "\n" + bootScript(RuleStore.toEngineJson(rules)) + "\n"
         return if (experience.tvInterface) {
             val stripAds = rules.any { it.action == "skip_ads" }
             base + "window.__qfYtTvOptions = { hideShorts: ${hideShorts()}, stripAds: $stripAds };\n" + navSource
@@ -171,6 +174,27 @@ class PlayerActivity : Activity() {
         })();
     """.trimIndent()
 
+    /**
+     * The layout width pages get. YouTube's TV interface is designed for a 1920-wide screen, but
+     * Fire TV's web view reports half the real width, which drew it at double size; so it always
+     * gets 1920, scaled by the Size setting. Sites keep their natural width unless Size changes it.
+     */
+    private fun viewportWidth(): Int? {
+        val factor = when (prefs.pageSize(platform.id)) { -1 -> 1.25; 1 -> 0.8; else -> 1.0 }
+        if (experience.tvInterface) return (1920 * factor).toInt()
+        if (factor == 1.0) return null
+        val metrics = resources.displayMetrics
+        return (metrics.widthPixels / metrics.density * factor).toInt()
+    }
+
+    private fun applyViewportSettings(view: WebView) {
+        val pinned = viewportWidth() != null
+        view.settings.useWideViewPort = pinned
+        view.settings.loadWithOverviewMode = pinned
+        view.settings.setSupportZoom(false)
+        view.settings.builtInZoomControls = false
+    }
+
     @SuppressLint("SetJavaScriptEnabled", "RequiresFeature")
     private fun configure(view: WebView) {
         view.settings.apply {
@@ -181,6 +205,7 @@ class PlayerActivity : Activity() {
             // YouTube serves its TV interface to TVs; the shared rules are written for mobile sites.
             userAgentString = if (experience.tvInterface) tvUserAgent() else mobileUserAgent()
         }
+        applyViewportSettings(view)
         view.isVerticalScrollBarEnabled = false
         view.isHorizontalScrollBarEnabled = false
         if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
@@ -509,6 +534,7 @@ class PlayerActivity : Activity() {
             add(View(context), match(), dp(8))
             add(menuRow("Home") { closeMenu(); webView.loadUrl(home) })
             add(menuRow("Reload") { closeMenu(); reload() })
+            add(sizeRow())
             val toggles = Experience.visibleToggles(platform.id, store.toggles(platform.id))
             if (toggles.isNotEmpty()) {
                 add(text("Filters", 18f, Ui.TEXT_MUTED, bold = true).apply { setPadding(0, dp(16), 0, 0) })
@@ -535,6 +561,25 @@ class PlayerActivity : Activity() {
         menu = scrim
         root.addView(scrim, FrameLayout.LayoutParams(match(), match()))
         list.post { list.getChildAt(2).requestFocus() }
+    }
+
+    private fun sizeLabel() = "Size: " + when (prefs.pageSize(platform.id)) { -1 -> "Smaller"; 1 -> "Larger"; else -> "Standard" }
+
+    /** Cycles Standard → Larger → Smaller, and reloads the page at the new size. */
+    private fun sizeRow(): View {
+        val row = text(sizeLabel(), 20f, bold = true)
+        row.setPadding(dp(24), dp(16), dp(24), dp(16))
+        row.background = focusBackground(16)
+        row.makeFocusable(1.02f) {
+            val next = when (prefs.pageSize(platform.id)) { 0 -> 1; 1 -> -1; else -> 0 }
+            prefs.setPageSize(platform.id, next)
+            row.text = sizeLabel()
+            applyViewportSettings(webView)
+            pageScript = buildPageScript(currentRules())
+            installScript(webView)
+            webView.reload()
+        }
+        return row
     }
 
     private fun menuRow(label: String, onClick: () -> Unit): View =

@@ -18,7 +18,9 @@ How the filtering works on each:
 
 - **YouTube / YouTube Music**: exactly as the YouTube app. **Back** goes back; on YouTube's home it asks to exit.
 - **Instagram**: arrows move between posts, tabs and buttons, **OK** selects, **Back** goes to the previous page, then home. In a full-screen video, **OK** plays/pauses, **left/right** skip 10 seconds.
-- **Menu (≡)**, everywhere: QuietFeed's menu with Home, Reload, this platform's Filters (they apply immediately) and Close.
+- **Menu (≡)**, everywhere: QuietFeed's menu with Home, Reload, **Size** (Standard, Larger or Smaller, saved per platform), this platform's Filters (they apply immediately) and Close.
+
+YouTube's TV interface is designed for a 1920-wide screen, but Fire TV's web view reports half the real width to pages, which drew everything at double size. `Viewport.js` pins its layout width to 1920 (or the Size setting's width) and the web view fits that to the screen.
 
 Not ported: multiple accounts per platform (Android's web view shares one cookie store), background audio, the mini-player, widgets, and the Blocking and Stats tabs.
 

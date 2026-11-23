@@ -24,6 +24,13 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("sawTvTip", false)
         set(value) = prefs.edit().putBoolean("sawTvTip", value).apply()
 
+    /** Page size per platform: -1 smaller, 0 standard, 1 larger. */
+    fun pageSize(platformId: String): Int = prefs.getInt("size.$platformId", 0)
+
+    fun setPageSize(platformId: String, size: Int) {
+        prefs.edit().putInt("size.$platformId", size.coerceIn(-1, 1)).apply()
+    }
+
     fun isEnabled(platformId: String): Boolean = prefs.getBoolean("enabled.$platformId", false)
 
     fun setEnabled(platformId: String, enabled: Boolean) {
